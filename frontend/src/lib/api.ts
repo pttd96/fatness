@@ -4,6 +4,7 @@ import type {
   ClientLookupResponse,
   CreatePlanRequest,
   Exercise,
+  ExerciseOrderItem,
   MuscleGroup,
   PlannedExerciseWithDetails,
   PlanSummary,
@@ -127,6 +128,11 @@ export const api = {
       apiFetch<PlannedExerciseWithDetails>(`/plans/${planId}/exercises`, {
         method: 'POST',
         body: JSON.stringify(exercise),
+      }),
+    reorder: (planId: string, items: ExerciseOrderItem[]) =>
+      apiFetch<WeeklyPlanWithExercises>(`/plans/${planId}/reorder`, {
+        method: 'PUT',
+        body: JSON.stringify({ items }),
       }),
     delete: (id: string) =>
       apiFetch<void>(`/plans/${id}`, {

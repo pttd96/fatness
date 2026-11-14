@@ -12,8 +12,8 @@ use crate::{
     middleware::auth::AuthUser,
     models::{
         plan::{
-            CreatePlanRequest, PaginationParams, PlanSummary, WeeklyPlan,
-            WeeklyPlanWithExercises,
+            CreatePlanRequest, PaginationParams, PlanSummary, ReorderExercisesRequest,
+            WeeklyPlan, WeeklyPlanWithExercises,
         },
         planned_exercise::PlannedExerciseWithDetails,
     },
@@ -396,4 +396,62 @@ pub async fn add_planned_exercise(
     .await?;
 
     Ok((StatusCode::CREATED, Json(exercise)))
+}
+
+pub async fn reorder_planned_exercises(
+    auth_user: AuthUser,
+    State(state): State<AppState>,
+    Path(plan_id): Path<Uuid>,
+    Json(payload): Json<ReorderExercisesRequest>,
+) -> Result<Json<WeeklyPlanWithExercises>, AppError> {
+    // 1. Verify plan exists and belongs to auth_user
+    let plan = sqlx::query_as::<_, WeeklyPlan>(
+        r#"
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        FROM public.weekly_plans
+        WHERE id = $1 AND user_id = $2
+        "#,
+    )
+    .bind(plan_id)
+    .bind(auth_user.user_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound(format!("Plan {} not found", plan_id)))?;
+
+    // 2. Atomically update exercise_order within a transaction
+    let mut tx = state.db.begin().await?;
+    for item in &payload.items {
+        sqlx::query(
+            r#"
+            UPDATE public.planned_exercises
+            SET exercise_order = $1
+            WHERE id = $2 AND weekly_plan_id = $3
+            "#,
+        )
+        .bind(item.exercise_order)
+        .bind(item.id)
+        .bind(plan.id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    // 3. Return full updated plan with exercises ordered by day_index ASC, exercise_order ASC
+    let exercises = sqlx::query_as::<_, PlannedExerciseWithDetails>(
+        r#"
+        SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
+               pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
+               pe.coaching_notes, pe.actual_log, pe.logged_at,
+               e.name AS exercise_name, e.muscle_group, e.youtube_url
+        FROM public.planned_exercises pe
+        JOIN public.exercises e ON e.id = pe.exercise_id
+        WHERE pe.weekly_plan_id = $1
+        ORDER BY pe.day_index ASC, pe.exercise_order ASC
+        "#,
+    )
+    .bind(plan.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok(Json(WeeklyPlanWithExercises { plan, exercises }))
 }

@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom'
 import {
   Calendar,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
   Dumbbell,
+  GripVertical,
   Play,
   Plus,
   Trash2,
@@ -15,6 +18,7 @@ import {
   Search,
   Layers,
   Sparkles,
+  ArrowUpDown,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { MOCK_CURRENT_PLAN, MOCK_EXERCISES } from '../lib/mockData'
@@ -47,6 +51,10 @@ export function Dashboard() {
   const [isEditing, setIsEditing] = useState(false)
   const [savingPlan, setSavingPlan] = useState(false)
 
+  // Drag and Drop reordering state
+  const [draggedItem, setDraggedItem] = useState<{ dayIndex: number; index: number } | null>(null)
+  const [dragOverItem, setDragOverItem] = useState<{ dayIndex: number; index: number } | null>(null)
+
   // Add Exercise Modal state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [targetDay, setTargetDay] = useState<{ dayIndex: number; dayLabel: string } | null>(null)
@@ -77,7 +85,16 @@ export function Dashboard() {
           const data = await api.plans.getCurrent()
           setPlan(data)
         } catch {
-          setPlan(MOCK_CURRENT_PLAN)
+          try {
+            const cached = localStorage.getItem('fatness_current_plan')
+            if (cached) {
+              setPlan(JSON.parse(cached))
+            } else {
+              setPlan(MOCK_CURRENT_PLAN)
+            }
+          } catch {
+            setPlan(MOCK_CURRENT_PLAN)
+          }
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load plan')
@@ -99,19 +116,27 @@ export function Dashboard() {
     setSavingPlan(true)
     setError(null)
     try {
-      const formattedExercises: CreatePlannedExerciseInput[] = updatedPlan.exercises.map(
-        (ex, idx) => ({
+      const dayCounters: Record<number, number> = {}
+      const sortedExercises = [...updatedPlan.exercises].sort((a, b) => {
+        if (a.day_index !== b.day_index) return a.day_index - b.day_index
+        return (a.exercise_order || 0) - (b.exercise_order || 0)
+      })
+
+      const formattedExercises: CreatePlannedExerciseInput[] = sortedExercises.map((ex) => {
+        const currentOrder = (dayCounters[ex.day_index] || 0) + 1
+        dayCounters[ex.day_index] = currentOrder
+        return {
           exercise_id: ex.exercise_id,
           day_label: ex.day_label,
           day_index: ex.day_index,
-          exercise_order: ex.exercise_order || idx + 1,
+          exercise_order: ex.exercise_order || currentOrder,
           target_sets: ex.target_sets,
           target_reps: ex.target_reps,
           target_weight_kg: ex.target_weight_kg,
           coaching_notes: ex.coaching_notes,
           actual_log: ex.actual_log,
-        })
-      )
+        }
+      })
 
       const savedResult = await api.plans.create({
         week_start: updatedPlan.week_start,
@@ -119,11 +144,109 @@ export function Dashboard() {
         exercises: formattedExercises,
       })
       setPlan(savedResult)
+      try {
+        localStorage.setItem('fatness_current_plan', JSON.stringify(savedResult))
+      } catch {}
       if (msg) showNotice(msg)
     } catch (err: any) {
-      setError(`Failed to save plan changes: ${err.message}`)
+      console.warn('Persist to backend failed:', err)
+      // Save locally to keep state consistent for guest users
+      try {
+        localStorage.setItem('fatness_current_plan', JSON.stringify(updatedPlan))
+      } catch {}
+      if (msg) showNotice(msg)
     } finally {
       setSavingPlan(false)
+    }
+  }
+
+  // Reorder exercises within a day
+  const handleMoveExercise = async (dayIndex: number, fromIdx: number, toIdx: number) => {
+    if (!plan) return
+    const dayExercises = plan.exercises
+      .filter((e) => e.day_index === dayIndex)
+      .slice()
+      .sort((a, b) => (a.exercise_order || 0) - (b.exercise_order || 0))
+
+    if (toIdx < 0 || toIdx >= dayExercises.length || fromIdx === toIdx) return
+
+    // Reorder dayExercises
+    const [moved] = dayExercises.splice(fromIdx, 1)
+    dayExercises.splice(toIdx, 0, moved)
+
+    // Re-assign exercise_order for this day (1..N)
+    const updatedDayExercises = dayExercises.map((ex, idx) => ({
+      ...ex,
+      exercise_order: idx + 1,
+    }))
+
+    // Build full updated exercises array
+    const otherExercises = plan.exercises.filter((e) => e.day_index !== dayIndex)
+    const allUpdatedExercises = [...otherExercises, ...updatedDayExercises].sort((a, b) => {
+      if (a.day_index !== b.day_index) return a.day_index - b.day_index
+      return (a.exercise_order || 0) - (b.exercise_order || 0)
+    })
+
+    const updatedPlan: WeeklyPlanWithExercises = {
+      ...plan,
+      exercises: allUpdatedExercises,
+    }
+
+    // Optimistic UI update
+    setPlan(updatedPlan)
+
+    // Prepare items for backend reorder
+    const items = updatedDayExercises.map((ex) => ({
+      id: ex.id,
+      exercise_order: ex.exercise_order,
+    }))
+
+    try {
+      const savedResult = await api.plans.reorder(plan.id, items)
+      setPlan(savedResult)
+      try {
+        localStorage.setItem('fatness_current_plan', JSON.stringify(savedResult))
+      } catch {}
+      showNotice(`Reordered exercises in ${dayExercises[0]?.day_label || `Day ${dayIndex}`}`)
+    } catch (err) {
+      console.warn('Backend reorder failed, keeping local changes:', err)
+      try {
+        localStorage.setItem('fatness_current_plan', JSON.stringify(updatedPlan))
+      } catch {}
+      showNotice(`Reordered exercises in ${dayExercises[0]?.day_label || `Day ${dayIndex}`}`)
+    }
+  }
+
+  // HTML5 Drag and drop handlers
+  const handleDragStart = (e: React.DragEvent, dayIndex: number, index: number) => {
+    e.dataTransfer.setData('text/plain', `${dayIndex}:${index}`)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedItem({ dayIndex, index })
+  }
+
+  const handleDragOver = (e: React.DragEvent, dayIndex: number, index: number) => {
+    e.preventDefault()
+    if (!draggedItem || draggedItem.dayIndex !== dayIndex) return
+    if (dragOverItem?.dayIndex !== dayIndex || dragOverItem?.index !== index) {
+      setDragOverItem({ dayIndex, index })
+    }
+  }
+
+  const handleDragEnd = () => {
+    setDraggedItem(null)
+    setDragOverItem(null)
+  }
+
+  const handleDrop = async (e: React.DragEvent, targetDayIndex: number, targetIndex: number) => {
+    e.preventDefault()
+    if (!draggedItem) return
+    if (draggedItem.dayIndex !== targetDayIndex) return
+    const from = draggedItem.index
+    const to = targetIndex
+    setDraggedItem(null)
+    setDragOverItem(null)
+    if (from !== to) {
+      await handleMoveExercise(targetDayIndex, from, to)
     }
   }
 
@@ -222,6 +345,11 @@ export function Dashboard() {
       daysMap.get(ex.day_index)!.exercises.push(ex)
     })
   }
+
+  // Ensure exercises within each day are sorted by exercise_order ASC
+  daysMap.forEach((dayData) => {
+    dayData.exercises.sort((a, b) => (a.exercise_order || 0) - (b.exercise_order || 0))
+  })
 
   const sortedDays = Array.from(daysMap.entries()).sort(([a], [b]) => a - b)
   const totalExercises = plan?.exercises.length || 0
@@ -327,7 +455,7 @@ export function Dashboard() {
             <div>
               <p className="font-bold">Edit Mode Active</p>
               <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                Click the trash icon to remove an exercise, or "+ Add Exercise" to insert exercises into any session. Day labels can also be edited directly.
+                Use the up/down arrows or drag & drop to reorder exercises, click the trash icon to remove, or "+ Add Exercise" to insert exercises into any session.
               </p>
             </div>
           </div>
@@ -410,7 +538,7 @@ export function Dashboard() {
                     </div>
 
                     {!isEditing && (
-                      <div>
+                      <div className="flex items-center gap-2">
                         {isAllCompleted ? (
                           <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800">
                             <CheckCircle2 className="w-3.5 h-3.5" /> Done
@@ -424,6 +552,16 @@ export function Dashboard() {
                             {dayData.exercises.length} exercises
                           </span>
                         )}
+
+                        {/* Quick Edit/Reorder Button */}
+                        <button
+                          type="button"
+                          onClick={() => setIsEditing(true)}
+                          title="Edit & reorder session"
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          <ArrowUpDown className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
                   </div>
@@ -435,48 +573,112 @@ export function Dashboard() {
                         No exercises in this session. Click "+ Add Exercise" below.
                       </div>
                     ) : (
-                      dayData.exercises.map((ex) => (
-                        <div
-                          key={ex.id}
-                          className="flex items-center justify-between text-xs py-2 px-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/70 transition-all"
-                        >
-                          <div className="flex items-center gap-2.5 truncate mr-2 flex-1">
-                            <div
-                              className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                                ex.actual_log ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
-                              }`}
-                            />
-                            <span
-                              className={`font-semibold truncate ${
-                                ex.actual_log
-                                  ? 'text-slate-400 dark:text-slate-500 line-through'
-                                  : 'text-slate-800 dark:text-slate-200'
-                              }`}
-                            >
-                              {ex.exercise_name}
-                            </span>
-                          </div>
+                      dayData.exercises.map((ex, idx) => {
+                        const isBeingDragged =
+                          draggedItem?.dayIndex === dayIndex && draggedItem?.index === idx
+                        const isDragOver =
+                          dragOverItem?.dayIndex === dayIndex && dragOverItem?.index === idx
 
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono font-medium">
-                              {ex.target_sets}×{ex.target_reps}{' '}
-                              {ex.target_weight_kg ? `@${ex.target_weight_kg}kg` : ''}
-                            </span>
+                        return (
+                          <div
+                            key={ex.id}
+                            draggable={isEditing}
+                            onDragStart={(e) => handleDragStart(e, dayIndex, idx)}
+                            onDragOver={(e) => handleDragOver(e, dayIndex, idx)}
+                            onDrop={(e) => handleDrop(e, dayIndex, idx)}
+                            onDragEnd={handleDragEnd}
+                            className={`flex items-center justify-between text-xs py-2 px-3 rounded-xl border transition-all ${
+                              isBeingDragged
+                                ? 'opacity-40 bg-slate-100 dark:bg-slate-800 border-dashed border-emerald-500'
+                                : isDragOver
+                                ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/20'
+                                : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/70 dark:border-slate-700/70 hover:border-slate-300 dark:hover:border-slate-600'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 truncate mr-2 flex-1 min-w-0">
+                              {/* Drag Handle in Edit Mode */}
+                              {isEditing && (
+                                <span
+                                  className="cursor-grab active:cursor-grabbing text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 p-0.5"
+                                  title="Drag to reorder"
+                                >
+                                  <GripVertical className="w-3.5 h-3.5" />
+                                </span>
+                              )}
 
-                            {/* Remove button in Edit Mode */}
-                            {isEditing && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveExercise(ex.id)}
-                                title="Remove exercise from session"
-                                className="p-1 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors ml-1"
+                              {/* Order Badge */}
+                              <span
+                                className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-md bg-slate-200/80 dark:bg-slate-700/80 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300"
+                                title={`Exercise #${idx + 1}`}
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                                {idx + 1}
+                              </span>
+
+                              <div
+                                className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                  ex.actual_log ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+                                }`}
+                              />
+                              <span
+                                className={`font-semibold truncate ${
+                                  ex.actual_log
+                                    ? 'text-slate-400 dark:text-slate-500 line-through'
+                                    : 'text-slate-800 dark:text-slate-200'
+                                }`}
+                              >
+                                {ex.exercise_name}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono font-medium hidden sm:inline">
+                                {ex.target_sets}×{ex.target_reps}{' '}
+                                {ex.target_weight_kg ? `@${ex.target_weight_kg}kg` : ''}
+                              </span>
+
+                              {/* Reorder Up / Down & Remove buttons in Edit Mode */}
+                              {isEditing && (
+                                <div className="flex items-center gap-0.5 ml-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveExercise(dayIndex, idx, idx - 1)}
+                                    disabled={idx === 0}
+                                    title="Move exercise up"
+                                    className={`p-1 rounded-lg transition-colors ${
+                                      idx === 0
+                                        ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
+                                        : 'text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                    }`}
+                                  >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveExercise(dayIndex, idx, idx + 1)}
+                                    disabled={idx === dayData.exercises.length - 1}
+                                    title="Move exercise down"
+                                    className={`p-1 rounded-lg transition-colors ${
+                                      idx === dayData.exercises.length - 1
+                                        ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
+                                        : 'text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40'
+                                    }`}
+                                  >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveExercise(ex.id)}
+                                    title="Remove exercise from session"
+                                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors ml-0.5"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      ))
+                        )
+                      })
                     )}
                   </div>
                 </div>

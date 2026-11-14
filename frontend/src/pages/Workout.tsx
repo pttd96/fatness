@@ -54,7 +54,9 @@ export function Workout() {
     load()
   }, [])
 
-  const dayExercises = plan?.exercises.filter((ex) => ex.day_index === currentDayNum) || []
+  const dayExercises = (plan?.exercises.filter((ex) => ex.day_index === currentDayNum) || [])
+    .slice()
+    .sort((a, b) => (a.exercise_order || 0) - (b.exercise_order || 0))
   const dayLabel = dayExercises[0]?.day_label || `Day ${currentDayNum}`
 
   const allDayIndexes = Array.from(new Set(plan?.exercises.map((e) => e.day_index) || [])).sort((a, b) => a - b)

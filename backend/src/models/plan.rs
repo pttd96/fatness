@@ -64,3 +64,14 @@ pub struct CreatePlanRequest {
     #[serde(default)]
     pub exercises: Vec<CreatePlannedExerciseInput>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExerciseOrderItem {
+    pub id: Uuid,
+    pub exercise_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReorderExercisesRequest {
+    pub items: Vec<ExerciseOrderItem>,
+}

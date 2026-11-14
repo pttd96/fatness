@@ -128,3 +128,12 @@ export interface AddExerciseToDayRequest {
   target_weight_kg?: number | null
   coaching_notes?: string | null
 }
+
+export interface ExerciseOrderItem {
+  id: string
+  exercise_order: number
+}
+
+export interface ReorderExercisesRequest {
+  items: ExerciseOrderItem[]
+}

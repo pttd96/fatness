@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use axum::{
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use sqlx::postgres::PgPoolOptions;
@@ -109,6 +109,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/plans/{id}/exercises",
             post(handlers::plans::add_planned_exercise),
+        )
+        .route(
+            "/plans/{id}/reorder",
+            put(handlers::plans::reorder_planned_exercises),
         )
         .route("/plans/generate", post(handlers::plans::generate_plan))
         // Planned exercise routes
