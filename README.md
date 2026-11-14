@@ -16,7 +16,7 @@ Personalized fitness tracking web application where users track weekly exercise 
 - **Database & Auth:** Supabase (PostgreSQL with Row Level Security + Modern Asymmetric ES256 Auth)
 - **Deployment & CI/CD:**
   - Frontend: Firebase Hosting via GitHub Actions ([`.github/workflows/deploy-frontend.yml`](.github/workflows/deploy-frontend.yml))
-  - Backend: GCP Cloud Run via GCP Cloud Build trigger
+  - Backend: GCP Cloud Run via GitHub Actions ([`.github/workflows/deploy-backend.yml`](.github/workflows/deploy-backend.yml))
 
 ---
 
