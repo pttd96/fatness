@@ -147,14 +147,22 @@ export const api = {
   },
 
   logs: {
-    updateLog: (plannedExerciseId: string, actualLog: string | null) =>
-      apiFetch<PlannedExerciseWithDetails>(
+    updateLog: (
+      plannedExerciseId: string,
+      payload: string | null | { actual_log?: string | null; status?: 'active' | 'completed' }
+    ) => {
+      const body =
+        typeof payload === 'object' && payload !== null && ('actual_log' in payload || 'status' in payload)
+          ? payload
+          : { actual_log: payload, status: 'completed' as const }
+      return apiFetch<PlannedExerciseWithDetails>(
         `/planned-exercises/${plannedExerciseId}/log`,
         {
           method: 'PATCH',
-          body: JSON.stringify({ actual_log: actualLog }),
+          body: JSON.stringify(body),
         }
-      ),
+      )
+    },
     deletePlannedExercise: (plannedExerciseId: string) =>
       apiFetch<void>(`/planned-exercises/${plannedExerciseId}`, {
         method: 'DELETE',

@@ -238,6 +238,18 @@ pub async fn create_or_update_client_plan(
 
     // Insert notification to client
     if let Some(client_email) = &client_profile.email {
+        let coach_name = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT display_name FROM public.user_profiles WHERE user_id = $1",
+        )
+        .bind(coach.0.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| coach_email.split('@').next().unwrap_or(&coach_email).to_string());
+
         let _ = sqlx::query(
             r#"
             INSERT INTO public.notifications (
@@ -249,7 +261,7 @@ pub async fn create_or_update_client_plan(
         .bind(client_email.trim().to_lowercase())
         .bind(coach_email.trim().to_lowercase())
         .bind(format!("New Training Plan for Week of {}", payload.week_start))
-        .bind(format!("Coach {} created your training plan.", coach_email))
+        .bind(format!("Coach {} created your training plan.", coach_name))
         .execute(&mut *tx)
         .await;
     }
@@ -512,6 +524,18 @@ pub async fn rollover_client_plan(
 
     // 5. Send notification to client
     if let Some(client_email) = &client_profile.email {
+        let coach_name = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT display_name FROM public.user_profiles WHERE user_id = $1",
+        )
+        .bind(coach.0.user_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .ok()
+        .flatten()
+        .flatten()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| coach_email.split('@').next().unwrap_or(&coach_email).to_string());
+
         let _ = sqlx::query(
             r#"
             INSERT INTO public.notifications (
@@ -523,7 +547,7 @@ pub async fn rollover_client_plan(
         .bind(client_email.trim().to_lowercase())
         .bind(coach_email.trim().to_lowercase())
         .bind(format!("New Plan for Week of {}", new_week_start))
-        .bind(format!("Coach {} has prepared your training plan for the upcoming week.", coach_email))
+        .bind(format!("Coach {} has prepared your training plan for the upcoming week.", coach_name))
         .execute(&mut *tx)
         .await;
     }

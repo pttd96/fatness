@@ -8,6 +8,7 @@ pub struct Notification {
     pub id: Uuid,
     pub recipient_email: String,
     pub sender_email: String,
+    pub sender_name: Option<String>,
     pub r#type: String,
     pub title: String,
     pub message: String,

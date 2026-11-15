@@ -155,12 +155,18 @@ export interface Notification {
   id: string
   recipient_email: string
   sender_email: string
+  sender_name?: string | null
   type: NotificationType
   title: string
   message: string
   link_url: string | null
   is_read: boolean
   created_at: string
+}
+
+export interface LogExercisePayload {
+  actual_log?: string | null
+  status?: 'active' | 'completed'
 }
 
 export interface NotificationListResponse {

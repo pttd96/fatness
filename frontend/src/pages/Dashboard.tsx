@@ -19,6 +19,7 @@ import {
   Layers,
   Sparkles,
   ArrowUpDown,
+  Circle,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { MOCK_CURRENT_PLAN, MOCK_EXERCISES } from '../lib/mockData'
@@ -250,6 +251,49 @@ export function Dashboard() {
     }
   }
 
+  // 1-Click Toggle Exercise Done / Active
+  const handleToggleExerciseDone = async (exercise: PlannedExerciseWithDetails) => {
+    if (!plan || isEditing) return
+    const isCompleted = exercise.status === 'completed' || Boolean(exercise.logged_at)
+    const nextStatus = isCompleted ? 'active' : 'completed'
+
+    const updatedExercises = plan.exercises.map((e) =>
+      e.id === exercise.id
+        ? {
+            ...e,
+            status: nextStatus as 'active' | 'completed',
+            actual_log: nextStatus === 'completed' ? (e.actual_log || null) : null,
+            logged_at: nextStatus === 'completed' ? (e.logged_at || new Date().toISOString()) : null,
+          }
+        : e
+    )
+
+    const updatedPlan: WeeklyPlanWithExercises = {
+      ...plan,
+      exercises: updatedExercises,
+    }
+
+    setPlan(updatedPlan)
+    try {
+      localStorage.setItem('fatness_current_plan', JSON.stringify(updatedPlan))
+    } catch {}
+
+    showNotice(
+      nextStatus === 'completed'
+        ? `✓ ${exercise.exercise_name} marked as Done!`
+        : `${exercise.exercise_name} marked as Active.`
+    )
+
+    try {
+      await api.logs.updateLog(exercise.id, {
+        status: nextStatus,
+        actual_log: nextStatus === 'completed' ? (exercise.actual_log || null) : null,
+      })
+    } catch (err) {
+      console.warn('Failed to update exercise status on backend:', err)
+    }
+  }
+
   // Remove exercise from plan
   const handleRemoveExercise = async (exerciseId: string) => {
     if (!plan) return
@@ -354,7 +398,7 @@ export function Dashboard() {
 
   const sortedDays = Array.from(daysMap.entries()).sort(([a], [b]) => a - b)
   const totalExercises = plan?.exercises.length || 0
-  const loggedExercises = plan?.exercises.filter((e) => Boolean(e.actual_log?.trim())).length || 0
+  const loggedExercises = plan?.exercises.filter((e) => e.status === 'completed' || Boolean(e.logged_at)).length || 0
   const progressPercent = totalExercises > 0 ? Math.round((loggedExercises / totalExercises) * 100) : 0
 
   // Filter exercises inside Add Modal
@@ -502,7 +546,7 @@ export function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {sortedDays.map(([dayIndex, dayData]) => {
-            const completedCount = dayData.exercises.filter((e) => Boolean(e.actual_log?.trim())).length
+            const completedCount = dayData.exercises.filter((e) => e.status === 'completed' || Boolean(e.logged_at)).length
             const isAllCompleted = completedCount === dayData.exercises.length && dayData.exercises.length > 0
             const isPartiallyDone = completedCount > 0 && !isAllCompleted
 
@@ -575,6 +619,7 @@ export function Dashboard() {
                       </div>
                     ) : (
                       dayData.exercises.map((ex, idx) => {
+                        const isCompleted = ex.status === 'completed' || Boolean(ex.logged_at)
                         const isBeingDragged =
                           draggedItem?.dayIndex === dayIndex && draggedItem?.index === idx
                         const isDragOver =
@@ -593,6 +638,8 @@ export function Dashboard() {
                                 ? 'opacity-40 bg-slate-100 dark:bg-slate-800 border-dashed border-emerald-500'
                                 : isDragOver
                                 ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/20'
+                                : isCompleted
+                                ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-300/80 dark:border-emerald-800/80'
                                 : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200/70 dark:border-slate-700/70 hover:border-slate-300 dark:hover:border-slate-600'
                             }`}
                           >
@@ -609,22 +656,43 @@ export function Dashboard() {
 
                               {/* Order Badge */}
                               <span
-                                className="w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-md bg-slate-200/80 dark:bg-slate-700/80 text-[10px] font-mono font-bold text-slate-700 dark:text-slate-300"
+                                className={`w-5 h-5 flex-shrink-0 flex items-center justify-center rounded-md text-[10px] font-mono font-bold ${
+                                  isCompleted
+                                    ? 'bg-emerald-200/80 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200'
+                                    : 'bg-slate-200/80 dark:bg-slate-700/80 text-slate-700 dark:text-slate-300'
+                                }`}
                                 title={`Exercise #${idx + 1}`}
                               >
                                 {idx + 1}
                               </span>
 
-                              <div
-                                className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                                  ex.actual_log ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
-                                }`}
-                              />
+                              {/* Interactive Toggle Check Button (Normal Mode) or Dot */}
+                              {!isEditing ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleExerciseDone(ex)}
+                                  title={isCompleted ? 'Click to mark as active' : 'Click to mark as done'}
+                                  className="focus:outline-none flex-shrink-0 p-0.5 group"
+                                >
+                                  {isCompleted ? (
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 fill-emerald-100 dark:fill-emerald-950/80 transition-transform group-hover:scale-110" />
+                                  ) : (
+                                    <Circle className="w-4 h-4 text-slate-300 dark:text-slate-600 group-hover:text-emerald-500 transition-colors" />
+                                  )}
+                                </button>
+                              ) : (
+                                <div
+                                  className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                                    isCompleted ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'
+                                  }`}
+                                />
+                              )}
+
                               <span
                                 className={`font-semibold truncate ${
-                                  ex.actual_log
-                                    ? 'text-slate-400 dark:text-slate-500 line-through'
-                                    : 'text-slate-800 dark:text-slate-200'
+                                  isCompleted
+                                    ? 'text-slate-900 dark:text-white'
+                                    : 'text-slate-700 dark:text-slate-300'
                                 }`}
                               >
                                 {ex.exercise_name}
@@ -636,6 +704,13 @@ export function Dashboard() {
                                 {ex.target_sets}×{ex.target_reps}{' '}
                                 {ex.target_weight_kg ? `@${ex.target_weight_kg}kg` : ''}
                               </span>
+
+                              {/* Done Pill Badge (when completed and not editing) */}
+                              {isCompleted && !isEditing && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100/90 dark:bg-emerald-900/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                                  <Check className="w-3 h-3 stroke-[3]" /> Done
+                                </span>
+                              )}
 
                               {/* Reorder Up / Down & Remove buttons in Edit Mode */}
                               {isEditing && (

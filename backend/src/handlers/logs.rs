@@ -19,14 +19,25 @@ pub async fn log_exercise(
     Json(payload): Json<LogExerciseRequest>,
 ) -> Result<Json<PlannedExercise>, AppError> {
     let email = auth_user.email.clone().unwrap_or_else(|| "user".to_string());
-    let has_log = payload.actual_log.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_some();
-    let status_str = if has_log { "completed" } else { "active" };
+    
+    // Determine target status: default to "completed" unless explicitly "active"
+    let new_status = match payload.status.as_deref() {
+        Some("active") => "active",
+        _ => "completed",
+    };
+
+    let cleaned_log = payload
+        .actual_log
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from);
 
     let updated = sqlx::query_as::<_, PlannedExercise>(
         r#"
         UPDATE public.planned_exercises pe
-        SET actual_log = $2,
-            logged_at = CASE WHEN $2 IS NOT NULL THEN now() ELSE NULL END,
+        SET actual_log = CASE WHEN $4 = 'active' THEN NULL ELSE $2 END,
+            logged_at = CASE WHEN $4 = 'active' THEN NULL ELSE COALESCE(pe.logged_at, now()) END,
             status = $4,
             updated_by = $5
         FROM public.weekly_plans wp
@@ -40,9 +51,9 @@ pub async fn log_exercise(
         "#,
     )
     .bind(id)
-    .bind(&payload.actual_log)
+    .bind(&cleaned_log)
     .bind(auth_user.user_id)
-    .bind(status_str)
+    .bind(new_status)
     .bind(&email)
     .fetch_optional(&state.db)
     .await?
@@ -91,6 +102,19 @@ pub async fn log_exercise(
 
         if let Some((Some(creator_email), week_start)) = plan_meta {
             if creator_email.trim().to_lowercase() != email.trim().to_lowercase() {
+                // Fetch athlete's nickname/display_name
+                let athlete_name = sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT display_name FROM public.user_profiles WHERE user_id = $1",
+                )
+                .bind(auth_user.user_id)
+                .fetch_optional(&state.db)
+                .await
+                .ok()
+                .flatten()
+                .flatten()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| email.split('@').next().unwrap_or(&email).to_string());
+
                 let _ = sqlx::query(
                     r#"
                     INSERT INTO public.notifications (
@@ -102,12 +126,26 @@ pub async fn log_exercise(
                 .bind(creator_email.trim().to_lowercase())
                 .bind(email.trim().to_lowercase())
                 .bind(format!("Plan Completed for Week of {}", week_start))
-                .bind(format!("Athlete {} has completed all scheduled exercises for the week of {}.", email, week_start))
+                .bind(format!("Athlete {} has completed all scheduled exercises for the week of {}.", athlete_name, week_start))
                 .bind(Some(format!("/coach?email={}", email)))
                 .execute(&state.db)
                 .await;
             }
         }
+    } else {
+        // If an exercise was untoggled/marked active, revert plan status from completed back to active
+        let _ = sqlx::query(
+            r#"
+            UPDATE public.weekly_plans
+            SET status = 'active',
+                updated_by = $2
+            WHERE id = $1 AND status = 'completed'
+            "#,
+        )
+        .bind(updated.weekly_plan_id)
+        .bind(&email)
+        .execute(&state.db)
+        .await;
     }
 
     Ok(Json(updated))

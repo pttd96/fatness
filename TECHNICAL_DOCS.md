@@ -173,7 +173,7 @@ All routes are registered in [`backend/src/main.rs`](file:///Users/admin/code/fa
 | `PUT` | `/plans/{id}/reorder` | `reorder_planned_exercises` | [`handlers/plans.rs`](file:///Users/admin/code/fatness/backend/src/handlers/plans.rs) | Atomically reorder planned exercises within a plan | Yes |
 | `POST` | `/plans/generate` | `generate_plan` | [`handlers/plans.rs`](file:///Users/admin/code/fatness/backend/src/handlers/plans.rs) | AI plan generation (Phase 3 stub) | Yes |
 | `DELETE` | `/planned-exercises/{id}` | `delete_planned_exercise` | [`handlers/logs.rs`](file:///Users/admin/code/fatness/backend/src/handlers/logs.rs) | Delete a single scheduled exercise | Yes |
-| `PATCH` | `/planned-exercises/{id}/log` | `log_exercise` | [`handlers/logs.rs`](file:///Users/admin/code/fatness/backend/src/handlers/logs.rs) | Record actual performance text & timestamp | Yes |
+| `PATCH` | `/planned-exercises/{id}/log` | `log_exercise` | [`handlers/logs.rs`](file:///Users/admin/code/fatness/backend/src/handlers/logs.rs) | Record performance log / toggle completion status (supports null/blank logs) | Yes |
 | `GET` | `/coach/clients/lookup` | `lookup_client` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Search client by email & get active plan | Yes (COACH) |
 | `POST` | `/coach/clients/{client_id}/plan` | `create_or_update_client_plan` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Create/replace client's weekly plan | Yes (COACH) |
 | `POST` | `/coach/clients/{client_id}/plan/rollover` | `rollover_client_plan` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Roll over client's completed plan to next week | Yes (COACH) |

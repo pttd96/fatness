@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -73,22 +74,74 @@ export function Workout() {
     setSavingId(exercise.id)
 
     try {
-      await api.logs.updateLog(exercise.id, text.trim() ? text : null)
+      const trimmedText = text.trim() ? text.trim() : null
+      await api.logs.updateLog(exercise.id, {
+        actual_log: trimmedText,
+        status: 'completed',
+      })
 
       // Keep local plan state synced
       if (plan) {
         const updatedExercises = plan.exercises.map((e) =>
           e.id === exercise.id
-            ? { ...e, actual_log: text, logged_at: new Date().toISOString() }
+            ? {
+                ...e,
+                status: 'completed' as const,
+                actual_log: trimmedText,
+                logged_at: e.logged_at || new Date().toISOString(),
+              }
             : e
         )
-        setPlan({ ...plan, exercises: updatedExercises })
+        const updatedPlan = { ...plan, exercises: updatedExercises }
+        setPlan(updatedPlan)
+        try {
+          localStorage.setItem('fatness_current_plan', JSON.stringify(updatedPlan))
+        } catch {}
       }
 
       setSavedSuccessId(exercise.id)
       setTimeout(() => setSavedSuccessId(null), 2500)
     } catch (err: any) {
       alert(`Failed to save log: ${err.message}`)
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+  const handleUnmarkLog = async (exercise: PlannedExerciseWithDetails) => {
+    setSavingId(exercise.id)
+
+    try {
+      await api.logs.updateLog(exercise.id, {
+        actual_log: null,
+        status: 'active',
+      })
+
+      if (plan) {
+        const updatedExercises = plan.exercises.map((e) =>
+          e.id === exercise.id
+            ? {
+                ...e,
+                status: 'active' as const,
+                actual_log: null,
+                logged_at: null,
+              }
+            : e
+        )
+        const updatedPlan = { ...plan, exercises: updatedExercises }
+        setPlan(updatedPlan)
+        try {
+          localStorage.setItem('fatness_current_plan', JSON.stringify(updatedPlan))
+        } catch {}
+      }
+
+      setLogs((prev) => {
+        const next = { ...prev }
+        delete next[exercise.id]
+        return next
+      })
+    } catch (err: any) {
+      alert(`Failed to unmark: ${err.message}`)
     } finally {
       setSavingId(null)
     }
@@ -153,7 +206,7 @@ export function Workout() {
           </div>
         ) : (
           dayExercises.map((exercise, idx) => {
-            const hasSaved = Boolean(exercise.actual_log?.trim())
+            const isCompleted = exercise.status === 'completed' || Boolean(exercise.logged_at)
             const isSaving = savingId === exercise.id
             const isJustSaved = savedSuccessId === exercise.id
 
@@ -161,8 +214,8 @@ export function Workout() {
               <div
                 key={exercise.id}
                 className={`rounded-3xl border transition-all p-6 sm:p-7 shadow-xs ${
-                  hasSaved
-                    ? 'bg-white dark:bg-slate-900 border-emerald-300 dark:border-emerald-700 ring-2 ring-emerald-500/10'
+                  isCompleted
+                    ? 'bg-emerald-50/20 dark:bg-emerald-950/10 border-emerald-400 dark:border-emerald-700 ring-2 ring-emerald-500/10'
                     : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
                 }`}
               >
@@ -175,11 +228,6 @@ export function Workout() {
                     <div>
                       <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         {exercise.exercise_name}
-                        {hasSaved && (
-                          <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                            <Check className="w-3 h-3" /> Logged
-                          </span>
-                        )}
                       </h2>
                       <span className="text-xs uppercase tracking-wider font-bold text-slate-500 dark:text-slate-400">
                         {exercise.muscle_group}
@@ -187,18 +235,26 @@ export function Workout() {
                     </div>
                   </div>
 
-                  {exercise.youtube_url && (
-                    <a
-                      href={exercise.youtube_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 transition-all self-start sm:self-auto"
-                    >
-                      <Youtube className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
-                      Watch Form Tutorial
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
+                  <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                    {isCompleted && (
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shadow-xs">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 fill-emerald-100 dark:fill-emerald-950/80" /> Done
+                      </div>
+                    )}
+
+                    {exercise.youtube_url && (
+                      <a
+                        href={exercise.youtube_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800 transition-all"
+                      >
+                        <Youtube className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                        Watch Form Tutorial
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 {/* Targets & Coaching Notes */}
@@ -232,43 +288,60 @@ export function Workout() {
                       <Flame className="w-3.5 h-3.5 text-amber-500" />
                       Your Actual Performance & Remarks:
                     </label>
-                    <span className="text-[11px] text-slate-500 dark:text-slate-400">Freeform (e.g. 4x8 @ 82.5kg, felt easy)</span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">Optional — leave blank if completed as prescribed</span>
                   </div>
 
                   <textarea
                     rows={2}
                     value={logs[exercise.id] ?? ''}
                     onChange={(e) => handleLogChange(exercise.id, e.target.value)}
-                    placeholder="e.g. Set 1: 10x80kg, Set 2: 9x80kg, Set 3: 8x80kg. Left shoulder felt 100% fine."
+                    placeholder="Optional: e.g. 4x8 @ 82.5kg, felt easy. Leave blank to confirm completed as planned."
                     className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 dark:text-white placeholder-slate-400 text-sm outline-none transition-all resize-y shadow-2xs"
                   />
 
                   <div className="flex items-center justify-between pt-1">
                     <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                      {exercise.logged_at ? `Last saved ${new Date(exercise.logged_at).toLocaleTimeString()}` : ''}
+                      {exercise.logged_at ? `Completed ${new Date(exercise.logged_at).toLocaleTimeString()}` : ''}
                     </span>
 
-                    <button
-                      onClick={() => handleSaveLog(exercise)}
-                      disabled={isSaving}
-                      className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
-                        isJustSaved
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                      }`}
-                    >
-                      {isSaving ? (
-                        'Saving...'
-                      ) : isJustSaved ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" /> Saved!
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-3.5 h-3.5" /> Save Set Log
-                        </>
+                    <div className="flex items-center gap-2">
+                      {isCompleted && (
+                        <button
+                          type="button"
+                          onClick={() => handleUnmarkLog(exercise)}
+                          disabled={isSaving}
+                          className="px-3 py-2 text-xs font-semibold text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 transition-colors"
+                        >
+                          Unmark Done
+                        </button>
                       )}
-                    </button>
+
+                      <button
+                        onClick={() => handleSaveLog(exercise)}
+                        disabled={isSaving}
+                        className={`inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-xs ${
+                          isJustSaved
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                        }`}
+                      >
+                        {isSaving ? (
+                          'Saving...'
+                        ) : isJustSaved ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 stroke-[3]" /> Saved!
+                          </>
+                        ) : isCompleted ? (
+                          <>
+                            <Save className="w-3.5 h-3.5" /> Update Remarks
+                          </>
+                        ) : (
+                          <>
+                            <Check className="w-3.5 h-3.5 stroke-[3]" /> Mark as Done
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

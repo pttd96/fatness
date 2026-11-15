@@ -173,48 +173,53 @@ export function NotificationBell() {
                 </p>
               </div>
             ) : (
-              notifications.map((item) => (
-                <div
-                  key={item.id}
-                  onClick={() => handleNotificationClick(item)}
-                  className={`p-3.5 flex items-start gap-3 cursor-pointer transition-colors ${
-                    !item.is_read
-                      ? 'bg-emerald-50/40 dark:bg-emerald-950/20 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30'
-                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                  }`}
-                >
-                  <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center flex-shrink-0 mt-0.5 border border-slate-200/60 dark:border-slate-700/60">
-                    {renderIcon(item.type)}
-                  </div>
+              notifications.map((item) => {
+                const senderNickname = item.sender_name?.trim() || item.sender_email.split('@')[0]
+                const displayMessage = item.message.split(item.sender_email).join(senderNickname)
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <p
-                        className={`text-xs truncate ${
-                          !item.is_read
-                            ? 'font-bold text-slate-900 dark:text-white'
-                            : 'font-semibold text-slate-700 dark:text-slate-300'
-                        }`}
-                      >
-                        {item.title}
-                      </p>
-                      <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex-shrink-0">
-                        {formatRelativeTime(item.created_at)}
-                      </span>
+                return (
+                  <div
+                    key={item.id}
+                    onClick={() => handleNotificationClick(item)}
+                    className={`p-3.5 flex items-start gap-3 cursor-pointer transition-colors ${
+                      !item.is_read
+                        ? 'bg-emerald-50/40 dark:bg-emerald-950/20 hover:bg-emerald-50/70 dark:hover:bg-emerald-950/30'
+                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center flex-shrink-0 mt-0.5 border border-slate-200/60 dark:border-slate-700/60">
+                      {renderIcon(item.type)}
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 mt-0.5">
-                      {item.message}
-                    </p>
-                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 truncate">
-                      From: <span className="font-mono">{item.sender_email}</span>
-                    </p>
-                  </div>
 
-                  {!item.is_read && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 self-center" />
-                  )}
-                </div>
-              ))
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <p
+                          className={`text-xs truncate ${
+                            !item.is_read
+                              ? 'font-bold text-slate-900 dark:text-white'
+                              : 'font-semibold text-slate-700 dark:text-slate-300'
+                          }`}
+                        >
+                          {item.title}
+                        </p>
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap flex-shrink-0">
+                          {formatRelativeTime(item.created_at)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 mt-0.5">
+                        {displayMessage}
+                      </p>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 truncate">
+                        From: <span className="font-semibold text-slate-700 dark:text-slate-300">{senderNickname}</span>
+                      </p>
+                    </div>
+
+                    {!item.is_read && (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0 self-center" />
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         </div>

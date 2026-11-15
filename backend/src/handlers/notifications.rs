@@ -28,10 +28,25 @@ pub async fn get_recent_notifications(
 
     let notifications = sqlx::query_as::<_, Notification>(
         r#"
-        SELECT id, recipient_email, sender_email, type, title, message, link_url, is_read, created_at
-        FROM public.notifications
-        WHERE LOWER(recipient_email) = $1
-        ORDER BY created_at DESC
+        SELECT 
+            n.id, 
+            n.recipient_email, 
+            n.sender_email,
+            COALESCE(NULLIF(TRIM(p.display_name), ''), SPLIT_PART(n.sender_email, '@', 1)) AS sender_name,
+            n.type, 
+            n.title, 
+            n.message, 
+            n.link_url, 
+            n.is_read, 
+            n.created_at
+        FROM public.notifications n
+        LEFT JOIN (
+            SELECT LOWER(email) AS email, MAX(display_name) AS display_name
+            FROM public.user_profiles
+            GROUP BY LOWER(email)
+        ) p ON p.email = LOWER(n.sender_email)
+        WHERE LOWER(n.recipient_email) = $1
+        ORDER BY n.created_at DESC
         LIMIT 5
         "#,
     )

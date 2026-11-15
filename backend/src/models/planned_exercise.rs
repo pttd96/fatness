@@ -47,4 +47,5 @@ pub struct PlannedExerciseWithDetails {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogExerciseRequest {
     pub actual_log: Option<String>,
+    pub status: Option<String>,
 }
