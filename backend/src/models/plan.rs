@@ -14,6 +14,8 @@ pub struct WeeklyPlan {
     pub llm_prompt_used: Option<String>,
     pub llm_raw_response: Option<String>,
     pub status: String,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -74,4 +76,9 @@ pub struct ExerciseOrderItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReorderExercisesRequest {
     pub items: Vec<ExerciseOrderItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RolloverPlanRequest {
+    pub new_week_start: Option<NaiveDate>,
 }

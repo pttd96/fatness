@@ -124,6 +124,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/planned-exercises/{id}/log",
             patch(handlers::logs::log_exercise),
         )
+        // Notification routes
+        .route(
+            "/notifications",
+            get(handlers::notifications::get_recent_notifications),
+        )
+        .route(
+            "/notifications/{id}/read",
+            patch(handlers::notifications::mark_as_read),
+        )
+        .route(
+            "/notifications/read-all",
+            post(handlers::notifications::mark_all_read),
+        )
         // Coach routes (Require COACH role)
         .route(
             "/coach/clients/lookup",
@@ -132,6 +145,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/coach/clients/{client_id}/plan",
             post(handlers::coach::create_or_update_client_plan),
+        )
+        .route(
+            "/coach/clients/{client_id}/plan/rollover",
+            post(handlers::coach::rollover_client_plan),
         )
         .route(
             "/coach/clients/{client_id}/plan/exercises",

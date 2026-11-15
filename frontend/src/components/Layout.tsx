@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useTheme } from '../hooks/useTheme'
+import { NotificationBell } from './NotificationBell'
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
@@ -81,6 +82,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate max-w-[150px]">{user.email}</span>
               </div>
             )}
+
+            {/* Notification Bell */}
+            <NotificationBell />
 
             {/* Light / Dark Mode Toggle next to email */}
             <button

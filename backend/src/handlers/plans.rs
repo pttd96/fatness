@@ -30,7 +30,7 @@ pub async fn get_current_plan(
 
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         FROM public.weekly_plans
         WHERE user_id = $1 AND (week_start = $2 OR status = 'active')
         ORDER BY week_start DESC
@@ -48,6 +48,7 @@ pub async fn get_current_plan(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -69,7 +70,7 @@ pub async fn get_plan(
 ) -> Result<Json<WeeklyPlanWithExercises>, AppError> {
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         FROM public.weekly_plans
         WHERE id = $1 AND user_id = $2
         "#,
@@ -85,6 +86,7 @@ pub async fn get_plan(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -131,20 +133,22 @@ pub async fn create_plan(
     State(state): State<AppState>,
     Json(payload): Json<CreatePlanRequest>,
 ) -> Result<(StatusCode, Json<WeeklyPlanWithExercises>), AppError> {
+    let email = auth_user.email.clone();
     let mut tx = state.db.begin().await?;
 
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        INSERT INTO public.weekly_plans (user_id, week_start, split_type, status, created_at)
-        VALUES ($1, $2, $3, 'active', now())
+        INSERT INTO public.weekly_plans (user_id, week_start, split_type, status, created_by, updated_by, created_at)
+        VALUES ($1, $2, $3, 'active', $4, $4, now())
         ON CONFLICT (user_id, week_start)
-        DO UPDATE SET split_type = EXCLUDED.split_type, status = 'active'
-        RETURNING id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        DO UPDATE SET split_type = EXCLUDED.split_type, status = 'active', updated_by = EXCLUDED.updated_by
+        RETURNING id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         "#,
     )
     .bind(auth_user.user_id)
     .bind(payload.week_start)
     .bind(&payload.split_type)
+    .bind(&email)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -203,14 +207,16 @@ pub async fn create_plan(
         let coaching_notes = ex.coaching_notes.as_deref().filter(|s| !s.trim().is_empty());
         let target_reps = ex.target_reps.as_deref().filter(|s| !s.trim().is_empty());
         let actual_log = ex.actual_log.as_deref().filter(|s| !s.trim().is_empty());
+        let status = if actual_log.is_some() { "completed" } else { "active" };
 
         sqlx::query(
             r#"
             INSERT INTO public.planned_exercises (
                 weekly_plan_id, exercise_id, day_label, day_index, exercise_order,
-                target_sets, target_reps, target_weight_kg, coaching_notes, actual_log, logged_at
+                target_sets, target_reps, target_weight_kg, coaching_notes, actual_log, logged_at,
+                status, created_by, updated_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 IS NOT NULL THEN now() ELSE NULL END)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 IS NOT NULL THEN now() ELSE NULL END, $11, $12, $12)
             "#,
         )
         .bind(plan.id)
@@ -223,6 +229,8 @@ pub async fn create_plan(
         .bind(ex.target_weight_kg)
         .bind(coaching_notes)
         .bind(actual_log)
+        .bind(status)
+        .bind(&email)
         .execute(&mut *tx)
         .await?;
     }
@@ -234,6 +242,7 @@ pub async fn create_plan(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -357,13 +366,15 @@ pub async fn add_planned_exercise(
     let target_reps = payload.target_reps.as_deref().filter(|s| !s.trim().is_empty());
     let actual_log = payload.actual_log.as_deref().filter(|s| !s.trim().is_empty());
 
+    let email = auth_user.email.clone();
     let inserted_id = sqlx::query_scalar::<_, Uuid>(
         r#"
         INSERT INTO public.planned_exercises (
             weekly_plan_id, exercise_id, day_label, day_index, exercise_order,
-            target_sets, target_reps, target_weight_kg, coaching_notes, actual_log, logged_at
+            target_sets, target_reps, target_weight_kg, coaching_notes, actual_log, logged_at,
+            status, created_by, updated_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 IS NOT NULL THEN now() ELSE NULL END)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CASE WHEN $10 IS NOT NULL THEN now() ELSE NULL END, 'active', $11, $11)
         RETURNING id
         "#,
     )
@@ -377,6 +388,7 @@ pub async fn add_planned_exercise(
     .bind(payload.target_weight_kg)
     .bind(coaching_notes)
     .bind(actual_log)
+    .bind(&email)
     .fetch_one(&state.db)
     .await?;
 
@@ -385,6 +397,7 @@ pub async fn add_planned_exercise(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -407,7 +420,7 @@ pub async fn reorder_planned_exercises(
     // 1. Verify plan exists and belongs to auth_user
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         FROM public.weekly_plans
         WHERE id = $1 AND user_id = $2
         "#,
@@ -442,6 +455,7 @@ pub async fn reorder_planned_exercises(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id

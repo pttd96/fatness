@@ -15,9 +15,10 @@ When the user asks to modify or implement something on a specific page, use this
 | **Workout Session Log** (`/workout/:dayIndex`) | [`frontend/src/pages/Workout.tsx`](file:///Users/admin/code/fatness/frontend/src/pages/Workout.tsx) | [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx), [`api.ts`](file:///Users/admin/code/fatness/frontend/src/lib/api.ts) | `GET /plans/current`, `PATCH /planned-exercises/{id}/log` | `fatness_current_plan` | Day switcher (Prev/Next Day), exercise target cards (sets/reps/weight), YouTube form tutorial link, actual performance textarea, Save Set Log button. |
 | **Plan Builder** (`/builder`) | [`frontend/src/pages/PlanBuilder.tsx`](file:///Users/admin/code/fatness/frontend/src/pages/PlanBuilder.tsx) | [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx), [`api.ts`](file:///Users/admin/code/fatness/frontend/src/lib/api.ts), [`mockData.ts`](file:///Users/admin/code/fatness/frontend/src/lib/mockData.ts) | `POST /plans`, `GET /exercises` | `fatness_current_plan` | Split template selector (`PPL`, `Upper/Lower`, `Bro Split`, `Full Body`), week start picker, custom day/exercise creator, drag/drop target parameters. |
 | **Exercise Library** (`/exercises`) | [`frontend/src/pages/ExerciseCatalog.tsx`](file:///Users/admin/code/fatness/frontend/src/pages/ExerciseCatalog.tsx) | [`api.ts`](file:///Users/admin/code/fatness/frontend/src/lib/api.ts), [`mockData.ts`](file:///Users/admin/code/fatness/frontend/src/lib/mockData.ts) | `GET /exercises`, `POST /exercises`, `PUT /exercises/{id}`, `DELETE /exercises/{id}` | `fatness_exercises_catalog` | Search bar, muscle group filter pills (`chest`, `back`, `shoulders`, etc.), **Create Exercise Modal**, **Edit Exercise Modal**, Delete button, YouTube tutorial links. |
+| **Coach Portal & Client Roster** (`/coach/clients`) | [`frontend/src/pages/CoachClients.tsx`](file:///Users/admin/code/fatness/frontend/src/pages/CoachClients.tsx) | [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx), [`api.ts`](file:///Users/admin/code/fatness/frontend/src/lib/api.ts) | `GET /coach/clients/lookup`, `POST /coach/clients/{client_id}/plan`, `POST /coach/clients/{client_id}/plan/rollover`, `POST /coach/clients/{client_id}/plan/exercises`, `PATCH /coach/clients/{client_id}/planned-exercises/{id}`, `DELETE /coach/clients/{client_id}/planned-exercises/{id}` | None | Email client lookup, view active/completed weekly plans, exercise target adjustments, **Roll Over Plan to Next Week** button, exercise status & audit badges. |
 | **User Settings & Profile** (`/settings`) | [`frontend/src/pages/Settings.tsx`](file:///Users/admin/code/fatness/frontend/src/pages/Settings.tsx) | [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx), [`api.ts`](file:///Users/admin/code/fatness/frontend/src/lib/api.ts) | `GET /profile`, `PUT /profile`, `POST /profile` | `fatness_user_profile` | Display name, fitness level (`beginner`, `intermediate`, `advanced`), primary goal (`strength`, `hypertrophy`, etc.), preferred split, training days slider, equipment notes. |
 | **Login / Register** (`/login`) | [`frontend/src/pages/Login.tsx`](file:///Users/admin/code/fatness/frontend/src/pages/Login.tsx) | [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx), [`supabase.ts`](file:///Users/admin/code/fatness/frontend/src/lib/supabase.ts) | Supabase Auth API (`/auth/v1/*`) | `fatness_guest_mode` | Sign In / Create Account tabs, email + password fields, instant Guest/Demo mode bypass button. |
-| **Global App Layout & Shell** | [`frontend/src/components/Layout.tsx`](file:///Users/admin/code/fatness/frontend/src/components/Layout.tsx) | [`useTheme.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useTheme.tsx), [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx) | None | `fatness_theme` | Top Navbar, desktop nav links, user email display, **Light/Dark Mode toggle button**, Sign Out button, mobile bottom navigation bar. |
+| **Global App Layout & Shell** | [`frontend/src/components/Layout.tsx`](file:///Users/admin/code/fatness/frontend/src/components/Layout.tsx) | [`useTheme.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useTheme.tsx), [`useAuth.tsx`](file:///Users/admin/code/fatness/frontend/src/hooks/useAuth.tsx), [`NotificationBell.tsx`](file:///Users/admin/code/fatness/frontend/src/components/NotificationBell.tsx) | `GET /notifications`, `PATCH /notifications/{id}/read`, `POST /notifications/read-all` | `fatness_theme` | Top Navbar, desktop nav links, user email display, **Notification Bell Popover** (recent 5 notifications + unread badge), **Light/Dark Mode toggle button**, Sign Out button, mobile bottom navigation bar. |
 
 ---
 
@@ -86,7 +87,9 @@ fatness/
 │       │   ├── mod.rs
 │       │   ├── profile.rs           # GET, POST, PUT /profile
 │       │   ├── exercises.rs         # GET, POST /exercises, GET, PUT, DELETE /exercises/{id}
-│       │   ├── plans.rs             # GET, POST /plans, /plans/current, /plans/{id}, POST /plans/{id}/exercises
+│       │   ├── plans.rs             # GET, POST /plans, /plans/current, /plans/{id}, POST /plans/{id}/exercises, PUT /plans/{id}/reorder
+│       │   ├── coach.rs             # Client lookup, plan creation/rollover, coach plan exercise management
+│       │   ├── notifications.rs     # GET /notifications, PATCH /notifications/{id}/read, POST /notifications/read-all
 │       │   └── logs.rs              # PATCH /planned-exercises/{id}/log, DELETE /planned-exercises/{id}
 │       ├── middleware/
 │       │   ├── mod.rs
@@ -95,8 +98,9 @@ fatness/
 │       │   ├── mod.rs
 │       │   ├── profile.rs           # UserProfile struct & DTOs
 │       │   ├── exercise.rs          # Exercise struct & DTOs
-│       │   ├── plan.rs              # WeeklyPlan, PlanSummary, CreatePlanRequest
-│       │   └── planned_exercise.rs  # PlannedExercise, PlannedExerciseWithDetails
+│       │   ├── plan.rs              # WeeklyPlan, PlanSummary, CreatePlanRequest, RolloverPlanRequest
+│       │   ├── planned_exercise.rs  # PlannedExercise, PlannedExerciseWithDetails
+│       │   └── notification.rs      # Notification, NotificationListResponse
 │       └── services/
 │           ├── mod.rs
 │           ├── exercise_matcher.rs  # Fuzzy matching exercise names against catalog
@@ -112,7 +116,7 @@ fatness/
 │       ├── App.tsx                  # BrowserRouter & Route configuration
 │       ├── index.css                # Tailwind directives & global resets
 │       ├── types/
-│       │   └── index.ts             # TypeScript interfaces (Exercise, Plan, Profile, etc.)
+│       │   └── index.ts             # TypeScript interfaces (Exercise, Plan, Profile, Notification, etc.)
 │       ├── hooks/
 │       │   ├── useAuth.tsx          # Supabase auth session, signIn, signUp, guestMode
 │       │   └── useTheme.tsx         # Light/Dark mode state & localStorage persistence
@@ -121,12 +125,14 @@ fatness/
 │       │   ├── supabase.ts          # Supabase client initialization
 │       │   └── mockData.ts          # Default mock exercises & current plan for guest mode
 │       ├── components/
-│       │   └── Layout.tsx           # Navbar, Nav items, theme toggle, demo badge, logout
+│       │   ├── Layout.tsx           # Navbar, Nav items, theme toggle, demo badge, logout
+│       │   └── NotificationBell.tsx # Notification popover with live polling & unread badge
 │       └── pages/
 │           ├── Dashboard.tsx        # Overview, completion %, session cards, in-place edit mode
 │           ├── Workout.tsx          # Set logging, coaching cues, YouTube tutorial embeds
 │           ├── PlanBuilder.tsx      # Split templates, custom routine creator
 │           ├── ExerciseCatalog.tsx  # Searchable library, create/edit modals, muscle filters
+│           ├── CoachClients.tsx     # Coach portal: client lookup, weekly plan management & rollover
 │           ├── Settings.tsx         # User profile preferences & target days
 │           └── Login.tsx            # Auth forms & Instant Demo access
 └── supabase/
@@ -136,7 +142,9 @@ fatness/
         ├── 20261113000003_create_weekly_plans.sql
         ├── 20261113000004_create_planned_exercises.sql
         ├── 20261113000005_enable_rls.sql
-        └── 20261113000006_seed_exercises.sql
+        ├── 20261113000006_seed_exercises.sql
+        ├── 20261115000001_add_audit_and_status_to_plans_and_exercises.sql
+        └── 20261115000002_create_notifications_table.sql
 ```
 
 ---
@@ -168,9 +176,13 @@ All routes are registered in [`backend/src/main.rs`](file:///Users/admin/code/fa
 | `PATCH` | `/planned-exercises/{id}/log` | `log_exercise` | [`handlers/logs.rs`](file:///Users/admin/code/fatness/backend/src/handlers/logs.rs) | Record actual performance text & timestamp | Yes |
 | `GET` | `/coach/clients/lookup` | `lookup_client` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Search client by email & get active plan | Yes (COACH) |
 | `POST` | `/coach/clients/{client_id}/plan` | `create_or_update_client_plan` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Create/replace client's weekly plan | Yes (COACH) |
+| `POST` | `/coach/clients/{client_id}/plan/rollover` | `rollover_client_plan` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Roll over client's completed plan to next week | Yes (COACH) |
 | `POST` | `/coach/clients/{client_id}/plan/exercises` | `add_client_planned_exercise` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Add planned exercise to client's day | Yes (COACH) |
 | `PATCH` | `/coach/clients/{client_id}/planned-exercises/{id}` | `update_client_planned_exercise` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Update client target sets/reps/weight/notes | Yes (COACH) |
 | `DELETE` | `/coach/clients/{client_id}/planned-exercises/{id}` | `delete_client_planned_exercise` | [`handlers/coach.rs`](file:///Users/admin/code/fatness/backend/src/handlers/coach.rs) | Delete planned exercise from client's day | Yes (COACH) |
+| `GET` | `/notifications` | `get_recent_notifications` | [`handlers/notifications.rs`](file:///Users/admin/code/fatness/backend/src/handlers/notifications.rs) | Get top 5 recent notifications + unread count | Yes |
+| `PATCH` | `/notifications/{id}/read` | `mark_as_read` | [`handlers/notifications.rs`](file:///Users/admin/code/fatness/backend/src/handlers/notifications.rs) | Mark specific notification as read | Yes |
+| `POST` | `/notifications/read-all` | `mark_all_read` | [`handlers/notifications.rs`](file:///Users/admin/code/fatness/backend/src/handlers/notifications.rs) | Mark all notifications as read | Yes |
 
 ---
 
@@ -181,6 +193,7 @@ PostgreSQL schema managed via SQL migrations in [`supabase/migrations/`](file://
 ```mermaid
 erDiagram
     user_profiles ||--o{ weekly_plans : "creates"
+    user_profiles ||--o{ notifications : "receives"
     weekly_plans ||--|{ planned_exercises : "contains"
     exercises ||--o{ planned_exercises : "referenced by"
 
@@ -218,6 +231,8 @@ erDiagram
         text llm_prompt_used
         text llm_raw_response
         varchar status "generated, active, completed"
+        varchar created_by "creator email"
+        varchar updated_by "updater email"
         timestamptz created_at
     }
 
@@ -234,6 +249,20 @@ erDiagram
         text coaching_notes
         text actual_log "e.g. Set 1: 10x80kg"
         timestamptz logged_at
+        varchar status "active, completed"
+        varchar created_by "creator email"
+        varchar updated_by "updater email"
+    }
+
+    notifications {
+        uuid id PK
+        uuid user_id FK "recipient user_id"
+        varchar title
+        text message
+        varchar notification_type "plan_completed, general"
+        jsonb metadata "plan_id, completed_by, etc."
+        boolean is_read
+        timestamptz created_at
     }
 ```
 

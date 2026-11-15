@@ -1,6 +1,7 @@
 pub mod coach;
 pub mod exercises;
 pub mod logs;
+pub mod notifications;
 pub mod plans;
 pub mod profile;
 
@@ -10,6 +11,8 @@ pub use coach::*;
 pub use exercises::*;
 #[allow(unused_imports)]
 pub use logs::*;
+#[allow(unused_imports)]
+pub use notifications::*;
 #[allow(unused_imports)]
 pub use plans::*;
 #[allow(unused_imports)]

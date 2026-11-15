@@ -7,6 +7,8 @@ import {
   Trash2,
   Save,
   Check,
+  CheckCircle2,
+  Copy,
   AlertCircle,
   ExternalLink,
   X,
@@ -40,6 +42,8 @@ export function CoachClients() {
   const [newWeight, setNewWeight] = useState<number>(60)
   const [newNotes, setNewNotes] = useState<string>('')
   const [addingExercise, setAddingExercise] = useState(false)
+  const [rollingOver, setRollingOver] = useState(false)
+  const [rolloverSuccess, setRolloverSuccess] = useState<string | null>(null)
 
   // Local edits map: planned_exercise_id -> { target_sets, target_reps, target_weight_kg, coaching_notes }
   const [exerciseEdits, setExerciseEdits] = useState<
@@ -193,6 +197,34 @@ export function CoachClients() {
       alert(`Failed to delete exercise: ${err.message}`)
     } finally {
       setDeletingExerciseId(null)
+    }
+  }
+
+  const handleRolloverPlan = async () => {
+    if (!clientData?.active_plan) return
+    setRollingOver(true)
+    setRolloverSuccess(null)
+    try {
+      const newPlan = await api.coach.rolloverPlan(clientData.client_id)
+      setClientData((prev) => (prev ? { ...prev, active_plan: newPlan } : null))
+
+      // Re-initialize edits with the new exercises
+      const initialEdits: Record<string, any> = {}
+      for (const ex of newPlan.exercises) {
+        initialEdits[ex.id] = {
+          target_sets: ex.target_sets ?? 3,
+          target_reps: ex.target_reps ?? '10',
+          target_weight_kg: ex.target_weight_kg ?? 0,
+          coaching_notes: ex.coaching_notes ?? '',
+        }
+      }
+      setExerciseEdits(initialEdits)
+      setRolloverSuccess(`Plan rolled over to week of ${newPlan.week_start}! You can now adjust targets.`)
+      setTimeout(() => setRolloverSuccess(null), 4000)
+    } catch (err: any) {
+      alert(`Failed to rollover plan: ${err.message}`)
+    } finally {
+      setRollingOver(false)
     }
   }
 
@@ -388,19 +420,55 @@ export function CoachClients() {
 
           {/* Plan Section */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-emerald-600" />
-                  Active Weekly Plan & Planned Exercises
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <Calendar className="w-5 h-5 text-emerald-600" />
+                    Weekly Training Plan
+                  </h3>
+                  {clientData.active_plan && (
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                        clientData.active_plan.status === 'completed'
+                          ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                          : 'bg-amber-50 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                      }`}
+                    >
+                      {clientData.active_plan.status === 'completed' ? '✓ Completed' : 'Active'}
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   {clientData.active_plan
-                    ? `Week of ${clientData.active_plan.week_start} • Split: ${clientData.active_plan.split_type.replace(/_/g, ' ')}`
+                    ? `Week of ${clientData.active_plan.week_start} • Split: ${clientData.active_plan.split_type.replace(/_/g, ' ')}${
+                        clientData.active_plan.created_by
+                          ? ` • Created by: ${clientData.active_plan.created_by}`
+                          : ''
+                      }`
                     : 'No active plan currently scheduled for this client.'}
                 </p>
               </div>
+
+              {clientData.active_plan && (
+                <button
+                  type="button"
+                  onClick={handleRolloverPlan}
+                  disabled={rollingOver}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all self-start sm:self-auto"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {rollingOver ? 'Rolling Over...' : 'Roll Over Plan to Next Week'}
+                </button>
+              )}
             </div>
+
+            {rolloverSuccess && (
+              <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold flex items-center gap-2 shadow-xs">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                {rolloverSuccess}
+              </div>
+            )}
 
             {!clientData.active_plan || sortedDayIndices.length === 0 ? (
               <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-2">
@@ -465,6 +533,15 @@ export function CoachClients() {
                                   <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
                                     {ex.muscle_group}
                                   </span>
+                                  <span
+                                    className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                      ex.status === 'completed'
+                                        ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                                    }`}
+                                  >
+                                    {ex.status === 'completed' ? '✓ Logged' : 'Pending'}
+                                  </span>
                                   {ex.youtube_url && (
                                     <a
                                       href={ex.youtube_url}
@@ -483,6 +560,11 @@ export function CoachClients() {
                                 {ex.actual_log && (
                                   <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
                                     Athlete Log: {ex.actual_log}
+                                  </p>
+                                )}
+                                {ex.updated_by && (
+                                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                                    Updated by: {ex.updated_by}
                                   </p>
                                 )}
                               </div>

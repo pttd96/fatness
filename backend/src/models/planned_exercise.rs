@@ -17,6 +17,9 @@ pub struct PlannedExercise {
     pub coaching_notes: Option<String>,
     pub actual_log: Option<String>,
     pub logged_at: Option<DateTime<Utc>>,
+    pub status: String,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -33,6 +36,9 @@ pub struct PlannedExerciseWithDetails {
     pub coaching_notes: Option<String>,
     pub actual_log: Option<String>,
     pub logged_at: Option<DateTime<Utc>>,
+    pub status: String,
+    pub created_by: Option<String>,
+    pub updated_by: Option<String>,
     pub exercise_name: String,
     pub muscle_group: String,
     pub youtube_url: Option<String>,

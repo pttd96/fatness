@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::{Datelike, Duration, Utc};
+use chrono::Duration;
 use serde::Deserialize;
 use serde_json::Value;
 use uuid::Uuid;
@@ -13,7 +13,7 @@ use crate::{
     middleware::auth::CoachUser,
     models::{
         coach::{AddExerciseToDayRequest, ClientLookupResponse, UpdatePlannedExerciseTargets},
-        plan::{CreatePlanRequest, WeeklyPlan, WeeklyPlanWithExercises},
+        plan::{CreatePlanRequest, RolloverPlanRequest, WeeklyPlan, WeeklyPlanWithExercises},
         planned_exercise::PlannedExerciseWithDetails,
         profile::UserProfile,
     },
@@ -83,22 +83,17 @@ pub async fn lookup_client(
         AppError::NotFound(format!("No registered client found with email '{}'", email))
     })?;
 
-    // 2. Fetch client's current weekly plan
-    let today = Utc::now().date_naive();
-    let days_from_monday = today.weekday().num_days_from_monday();
-    let this_monday = today - Duration::days(days_from_monday as i64);
-
+    // 2. Fetch client's latest weekly plan (active or completed)
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         FROM public.weekly_plans
-        WHERE user_id = $1 AND (week_start = $2 OR status = 'active')
+        WHERE user_id = $1
         ORDER BY week_start DESC
         LIMIT 1
         "#,
     )
     .bind(client.user_id)
-    .bind(this_monday)
     .fetch_optional(&state.db)
     .await?;
 
@@ -108,6 +103,7 @@ pub async fn lookup_client(
             SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                    pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                    pe.coaching_notes, pe.actual_log, pe.logged_at,
+                   pe.status, pe.created_by, pe.updated_by,
                    e.name AS exercise_name, e.muscle_group, e.youtube_url
             FROM public.planned_exercises pe
             JOIN public.exercises e ON e.id = pe.exercise_id
@@ -137,37 +133,37 @@ pub async fn lookup_client(
 }
 
 pub async fn create_or_update_client_plan(
-    _coach: CoachUser,
+    coach: CoachUser,
     State(state): State<AppState>,
     Path(client_id): Path<Uuid>,
     Json(payload): Json<CreatePlanRequest>,
 ) -> Result<(StatusCode, Json<WeeklyPlanWithExercises>), AppError> {
+    let coach_email = coach.0.email.clone().unwrap_or_else(|| "coach".to_string());
+
     // Verify client exists
-    let client_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM public.user_profiles WHERE user_id = $1)",
+    let client_profile = sqlx::query_as::<_, UserProfile>(
+        "SELECT * FROM public.user_profiles WHERE user_id = $1",
     )
     .bind(client_id)
-    .fetch_one(&state.db)
-    .await?;
-
-    if !client_exists {
-        return Err(AppError::NotFound("Client does not exist".to_string()));
-    }
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Client does not exist".to_string()))?;
 
     let mut tx = state.db.begin().await?;
 
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        INSERT INTO public.weekly_plans (user_id, week_start, split_type, status, created_at)
-        VALUES ($1, $2, $3, 'active', now())
+        INSERT INTO public.weekly_plans (user_id, week_start, split_type, status, created_by, updated_by, created_at)
+        VALUES ($1, $2, $3, 'active', $4, $4, now())
         ON CONFLICT (user_id, week_start)
-        DO UPDATE SET split_type = EXCLUDED.split_type, status = 'active'
-        RETURNING id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        DO UPDATE SET split_type = EXCLUDED.split_type, status = 'active', updated_by = EXCLUDED.updated_by
+        RETURNING id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         "#,
     )
     .bind(client_id)
     .bind(payload.week_start)
     .bind(&payload.split_type)
+    .bind(&coach_email)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -220,9 +216,10 @@ pub async fn create_or_update_client_plan(
             r#"
             INSERT INTO public.planned_exercises (
                 weekly_plan_id, exercise_id, day_label, day_index, exercise_order,
-                target_sets, target_reps, target_weight_kg, coaching_notes
+                target_sets, target_reps, target_weight_kg, coaching_notes,
+                status, created_by, updated_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $10)
             "#,
         )
         .bind(plan.id)
@@ -234,8 +231,27 @@ pub async fn create_or_update_client_plan(
         .bind(&ex.target_reps)
         .bind(ex.target_weight_kg)
         .bind(&ex.coaching_notes)
+        .bind(&coach_email)
         .execute(&mut *tx)
         .await?;
+    }
+
+    // Insert notification to client
+    if let Some(client_email) = &client_profile.email {
+        let _ = sqlx::query(
+            r#"
+            INSERT INTO public.notifications (
+                recipient_email, sender_email, type, title, message, link_url, is_read, created_at
+            )
+            VALUES ($1, $2, 'plan_created', $3, $4, '/dashboard', false, now())
+            "#,
+        )
+        .bind(client_email.trim().to_lowercase())
+        .bind(coach_email.trim().to_lowercase())
+        .bind(format!("New Training Plan for Week of {}", payload.week_start))
+        .bind(format!("Coach {} created your training plan.", coach_email))
+        .execute(&mut *tx)
+        .await;
     }
 
     tx.commit().await?;
@@ -246,6 +262,7 @@ pub async fn create_or_update_client_plan(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -261,15 +278,17 @@ pub async fn create_or_update_client_plan(
 }
 
 pub async fn add_client_planned_exercise(
-    _coach: CoachUser,
+    coach: CoachUser,
     State(state): State<AppState>,
     Path(client_id): Path<Uuid>,
     Json(payload): Json<AddExerciseToDayRequest>,
 ) -> Result<(StatusCode, Json<PlannedExerciseWithDetails>), AppError> {
+    let coach_email = coach.0.email.clone().unwrap_or_else(|| "coach".to_string());
+
     // 1. Get client's active weekly plan
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
-        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_at
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
         FROM public.weekly_plans
         WHERE user_id = $1 AND status = 'active'
         ORDER BY week_start DESC
@@ -299,9 +318,10 @@ pub async fn add_client_planned_exercise(
         r#"
         INSERT INTO public.planned_exercises (
             weekly_plan_id, exercise_id, day_label, day_index, exercise_order,
-            target_sets, target_reps, target_weight_kg, coaching_notes
+            target_sets, target_reps, target_weight_kg, coaching_notes,
+            status, created_by, updated_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $10)
         RETURNING id
         "#,
     )
@@ -314,6 +334,7 @@ pub async fn add_client_planned_exercise(
     .bind(payload.target_reps.unwrap_or_else(|| "10".to_string()))
     .bind(payload.target_weight_kg.unwrap_or(0.0))
     .bind(payload.coaching_notes)
+    .bind(&coach_email)
     .fetch_one(&state.db)
     .await?;
 
@@ -323,6 +344,7 @@ pub async fn add_client_planned_exercise(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -337,18 +359,21 @@ pub async fn add_client_planned_exercise(
 }
 
 pub async fn update_client_planned_exercise(
-    _coach: CoachUser,
+    coach: CoachUser,
     State(state): State<AppState>,
     Path((_client_id, planned_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<UpdatePlannedExerciseTargets>,
 ) -> Result<Json<PlannedExerciseWithDetails>, AppError> {
+    let coach_email = coach.0.email.clone().unwrap_or_else(|| "coach".to_string());
+
     let updated = sqlx::query(
         r#"
         UPDATE public.planned_exercises
         SET target_sets = COALESCE($2, target_sets),
             target_reps = COALESCE($3, target_reps),
             target_weight_kg = COALESCE($4, target_weight_kg),
-            coaching_notes = COALESCE($5, coaching_notes)
+            coaching_notes = COALESCE($5, coaching_notes),
+            updated_by = $6
         WHERE id = $1
         "#,
     )
@@ -357,6 +382,7 @@ pub async fn update_client_planned_exercise(
     .bind(payload.target_reps)
     .bind(payload.target_weight_kg)
     .bind(payload.coaching_notes)
+    .bind(&coach_email)
     .execute(&state.db)
     .await?;
 
@@ -369,6 +395,7 @@ pub async fn update_client_planned_exercise(
         SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
                pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
                pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
                e.name AS exercise_name, e.muscle_group, e.youtube_url
         FROM public.planned_exercises pe
         JOIN public.exercises e ON e.id = pe.exercise_id
@@ -397,4 +424,129 @@ pub async fn delete_client_planned_exercise(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn rollover_client_plan(
+    coach: CoachUser,
+    State(state): State<AppState>,
+    Path(client_id): Path<Uuid>,
+    Json(payload): Json<RolloverPlanRequest>,
+) -> Result<(StatusCode, Json<WeeklyPlanWithExercises>), AppError> {
+    let coach_email = coach.0.email.clone().unwrap_or_else(|| "coach".to_string());
+
+    // 1. Fetch client profile
+    let client_profile = sqlx::query_as::<_, UserProfile>(
+        "SELECT * FROM public.user_profiles WHERE user_id = $1",
+    )
+    .bind(client_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Client does not exist".to_string()))?;
+
+    // 2. Fetch client's latest plan to copy
+    let latest_plan = sqlx::query_as::<_, WeeklyPlan>(
+        r#"
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
+        FROM public.weekly_plans
+        WHERE user_id = $1
+        ORDER BY week_start DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(client_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("No previous plan found to rollover".to_string()))?;
+
+    let new_week_start = payload
+        .new_week_start
+        .unwrap_or_else(|| latest_plan.week_start + Duration::days(7));
+
+    let mut tx = state.db.begin().await?;
+
+    // 3. Create or update the new weekly plan
+    let plan = sqlx::query_as::<_, WeeklyPlan>(
+        r#"
+        INSERT INTO public.weekly_plans (user_id, week_start, split_type, status, created_by, updated_by, created_at)
+        VALUES ($1, $2, $3, 'active', $4, $4, now())
+        ON CONFLICT (user_id, week_start)
+        DO UPDATE SET split_type = EXCLUDED.split_type, status = 'active', updated_by = EXCLUDED.updated_by
+        RETURNING id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
+        "#,
+    )
+    .bind(client_id)
+    .bind(new_week_start)
+    .bind(&latest_plan.split_type)
+    .bind(&coach_email)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // Delete existing exercises for that target week if overwriting
+    sqlx::query("DELETE FROM public.planned_exercises WHERE weekly_plan_id = $1")
+        .bind(plan.id)
+        .execute(&mut *tx)
+        .await?;
+
+    // 4. Copy exercises from latest plan, resetting logs to NULL and status to 'active'
+    sqlx::query(
+        r#"
+        INSERT INTO public.planned_exercises (
+            weekly_plan_id, exercise_id, day_label, day_index, exercise_order,
+            target_sets, target_reps, target_weight_kg, coaching_notes,
+            actual_log, logged_at, status, created_by, updated_by
+        )
+        SELECT
+            $1, exercise_id, day_label, day_index, exercise_order,
+            target_sets, target_reps, target_weight_kg, coaching_notes,
+            NULL, NULL, 'active', $2, $2
+        FROM public.planned_exercises
+        WHERE weekly_plan_id = $3
+        ORDER BY day_index ASC, exercise_order ASC
+        "#,
+    )
+    .bind(plan.id)
+    .bind(&coach_email)
+    .bind(latest_plan.id)
+    .execute(&mut *tx)
+    .await?;
+
+    // 5. Send notification to client
+    if let Some(client_email) = &client_profile.email {
+        let _ = sqlx::query(
+            r#"
+            INSERT INTO public.notifications (
+                recipient_email, sender_email, type, title, message, link_url, is_read, created_at
+            )
+            VALUES ($1, $2, 'plan_created', $3, $4, '/dashboard', false, now())
+            "#,
+        )
+        .bind(client_email.trim().to_lowercase())
+        .bind(coach_email.trim().to_lowercase())
+        .bind(format!("New Plan for Week of {}", new_week_start))
+        .bind(format!("Coach {} has prepared your training plan for the upcoming week.", coach_email))
+        .execute(&mut *tx)
+        .await;
+    }
+
+    tx.commit().await?;
+
+    // 6. Fetch full updated plan with exercises
+    let exercises = sqlx::query_as::<_, PlannedExerciseWithDetails>(
+        r#"
+        SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
+               pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
+               pe.coaching_notes, pe.actual_log, pe.logged_at,
+               pe.status, pe.created_by, pe.updated_by,
+               e.name AS exercise_name, e.muscle_group, e.youtube_url
+        FROM public.planned_exercises pe
+        JOIN public.exercises e ON e.id = pe.exercise_id
+        WHERE pe.weekly_plan_id = $1
+        ORDER BY pe.day_index ASC, pe.exercise_order ASC
+        "#,
+    )
+    .bind(plan.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    Ok((StatusCode::CREATED, Json(WeeklyPlanWithExercises { plan, exercises })))
 }

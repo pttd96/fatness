@@ -6,8 +6,10 @@ import type {
   Exercise,
   ExerciseOrderItem,
   MuscleGroup,
+  NotificationListResponse,
   PlannedExerciseWithDetails,
   PlanSummary,
+  RolloverPlanRequest,
   UpdatePlannedExerciseTargets,
   UserProfile,
   WeeklyPlanWithExercises,
@@ -159,6 +161,18 @@ export const api = {
       }),
   },
 
+  notifications: {
+    list: () => apiFetch<NotificationListResponse>('/notifications'),
+    markAsRead: (id: string) =>
+      apiFetch<void>(`/notifications/${id}/read`, {
+        method: 'PATCH',
+      }),
+    markAllRead: () =>
+      apiFetch<void>('/notifications/read-all', {
+        method: 'POST',
+      }),
+  },
+
   coach: {
     lookupClient: (email: string) =>
       apiFetch<ClientLookupResponse>(
@@ -169,6 +183,14 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(plan),
       }),
+    rolloverPlan: (clientId: string, data: RolloverPlanRequest = {}) =>
+      apiFetch<WeeklyPlanWithExercises>(
+        `/coach/clients/${clientId}/plan/rollover`,
+        {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }
+      ),
     addExerciseToDay: (clientId: string, data: AddExerciseToDayRequest) =>
       apiFetch<PlannedExerciseWithDetails>(
         `/coach/clients/${clientId}/plan/exercises`,

@@ -47,6 +47,9 @@ export interface PlannedExerciseWithDetails {
   coaching_notes: string | null
   actual_log: string | null
   logged_at: string | null
+  status: 'active' | 'completed'
+  created_by?: string | null
+  updated_by?: string | null
   exercise_name: string
   muscle_group: string
   youtube_url: string | null
@@ -60,6 +63,8 @@ export interface WeeklyPlan {
   llm_prompt_used: string | null
   llm_raw_response: string | null
   status: 'generated' | 'active' | 'completed'
+  created_by?: string | null
+  updated_by?: string | null
   created_at: string
 }
 
@@ -71,6 +76,8 @@ export interface WeeklyPlanWithExercises {
   llm_prompt_used: string | null
   llm_raw_response: string | null
   status: 'generated' | 'active' | 'completed'
+  created_by?: string | null
+  updated_by?: string | null
   created_at: string
   exercises: PlannedExerciseWithDetails[]
 }
@@ -136,4 +143,27 @@ export interface ExerciseOrderItem {
 
 export interface ReorderExercisesRequest {
   items: ExerciseOrderItem[]
+}
+
+export interface RolloverPlanRequest {
+  new_week_start?: string
+}
+
+export type NotificationType = 'plan_completed' | 'plan_created' | 'plan_updated' | 'exercise_completed'
+
+export interface Notification {
+  id: string
+  recipient_email: string
+  sender_email: string
+  type: NotificationType
+  title: string
+  message: string
+  link_url: string | null
+  is_read: boolean
+  created_at: string
+}
+
+export interface NotificationListResponse {
+  notifications: Notification[]
+  unread_count: number
 }

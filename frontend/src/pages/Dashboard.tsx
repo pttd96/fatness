@@ -295,6 +295,7 @@ export function Dashboard() {
       coaching_notes: modalNotes.trim() ? modalNotes.trim() : null,
       actual_log: null,
       logged_at: null,
+      status: 'active',
       exercise_name: chosenEx.name,
       muscle_group: chosenEx.muscle_group,
       youtube_url: chosenEx.youtube_url || null,
