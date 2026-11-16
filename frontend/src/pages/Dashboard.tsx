@@ -15,13 +15,13 @@ import {
   Edit3,
   Check,
   X,
-  Search,
   Layers,
   Sparkles,
   ArrowUpDown,
   Circle,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { ExerciseCombobox } from '../components/ExerciseCombobox'
 import { MOCK_CURRENT_PLAN, MOCK_EXERCISES } from '../lib/mockData'
 import type {
   CreatePlannedExerciseInput,
@@ -64,7 +64,6 @@ export function Dashboard() {
   const [modalReps, setModalReps] = useState('8-10')
   const [modalWeight, setModalWeight] = useState(50)
   const [modalNotes, setModalNotes] = useState('')
-  const [modalSearch, setModalSearch] = useState('')
   const [modalMuscle, setModalMuscle] = useState<MuscleGroup | 'all'>('all')
 
   useEffect(() => {
@@ -313,7 +312,6 @@ export function Dashboard() {
     setModalReps('8-10')
     setModalWeight(50)
     setModalNotes('')
-    setModalSearch('')
     setModalMuscle('all')
     setIsAddModalOpen(true)
   }
@@ -400,15 +398,6 @@ export function Dashboard() {
   const totalExercises = plan?.exercises.length || 0
   const loggedExercises = plan?.exercises.filter((e) => e.status === 'completed' || Boolean(e.logged_at)).length || 0
   const progressPercent = totalExercises > 0 ? Math.round((loggedExercises / totalExercises) * 100) : 0
-
-  // Filter exercises inside Add Modal
-  const modalFilteredExercises = catalog.filter((ex) => {
-    const matchesMuscle = modalMuscle === 'all' || ex.muscle_group === modalMuscle
-    const matchesSearch =
-      ex.name.toLowerCase().includes(modalSearch.toLowerCase()) ||
-      ex.muscle_group.toLowerCase().includes(modalSearch.toLowerCase())
-    return matchesMuscle && matchesSearch
-  })
 
   return (
     <div className="space-y-8 pb-16">
@@ -832,32 +821,16 @@ export function Dashboard() {
                   ))}
                 </div>
 
-                <div className="relative">
-                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search exercise..."
-                    value={modalSearch}
-                    onChange={(e) => setModalSearch(e.target.value)}
-                    className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-none focus:border-emerald-500"
-                  />
-                </div>
-
-                <select
-                  value={modalExerciseId}
-                  onChange={(e) => setModalExerciseId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-sm font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none shadow-2xs"
-                >
-                  {modalFilteredExercises.length === 0 ? (
-                    <option disabled>No matching exercises found</option>
-                  ) : (
-                    modalFilteredExercises.map((ex) => (
-                      <option key={ex.id} value={ex.id}>
-                        {ex.name} ({ex.muscle_group})
-                      </option>
-                    ))
-                  )}
-                </select>
+                <ExerciseCombobox
+                  exercises={
+                    modalMuscle === 'all'
+                      ? catalog
+                      : catalog.filter((c) => c.muscle_group === modalMuscle)
+                  }
+                  selectedExerciseId={modalExerciseId}
+                  onSelect={(exercise) => setModalExerciseId(exercise.id)}
+                  placeholder="Search movement or muscle group (e.g. Bench Press)..."
+                />
               </div>
 
               {/* Target Sets, Reps, Weight */}

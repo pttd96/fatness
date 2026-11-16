@@ -10,6 +10,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { ExerciseCombobox } from '../components/ExerciseCombobox'
 import { MOCK_EXERCISES } from '../lib/mockData'
 import type { CreatePlannedExerciseInput, Exercise, SplitType } from '../types'
 
@@ -442,6 +443,30 @@ export function PlanBuilder() {
     )
   }
 
+  const handleSelectExercise = (
+    dayIndex: number,
+    tempId: string,
+    exercise: Exercise
+  ) => {
+    setDays((prev) =>
+      prev.map((d) => {
+        if (d.dayIndex !== dayIndex) return d
+        return {
+          ...d,
+          exercises: d.exercises.map((ex) => {
+            if (ex.tempId !== tempId) return ex
+            return {
+              ...ex,
+              exerciseId: exercise.id,
+              exerciseName: exercise.name,
+              muscleGroup: exercise.muscle_group,
+            }
+          }),
+        }
+      })
+    )
+  }
+
   const handleSavePlan = async () => {
     try {
       setSaving(true)
@@ -559,10 +584,10 @@ export function PlanBuilder() {
         {days.map((day, dayIndex) => (
           <div
             key={day.dayIndex}
-            className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs"
+            className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs"
           >
             {/* Day Header */}
-            <div className="p-4 sm:p-5 bg-slate-50/80 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="p-4 sm:p-5 bg-slate-50/80 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-t-3xl">
               <div className="flex items-center gap-3 flex-1">
                 <span className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-extrabold text-xs flex items-center justify-center flex-shrink-0">
                   #{day.dayIndex}
@@ -608,28 +633,20 @@ export function PlanBuilder() {
                     className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3"
                   >
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                      <div className="flex items-center gap-2 flex-1">
-                        <span className="text-xs font-mono font-bold text-slate-400 dark:text-slate-500 w-5">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="text-xs font-mono font-bold text-slate-400 dark:text-slate-500 w-5 flex-shrink-0">
                           {exIdx + 1}.
                         </span>
-                        <select
-                          value={ex.exerciseId}
-                          onChange={(e) =>
-                            handleUpdateExercise(day.dayIndex, ex.tempId, 'exerciseId', e.target.value)
+                        <ExerciseCombobox
+                          exercises={exercisesList}
+                          selectedExerciseId={ex.exerciseId}
+                          selectedExerciseName={ex.exerciseName}
+                          placeholder={ex.exerciseName ? `e.g. ${ex.exerciseName}` : 'e.g. Bench Press'}
+                          onSelect={(chosen) =>
+                            handleSelectExercise(day.dayIndex, ex.tempId, chosen)
                           }
-                          className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-3 py-1.5 text-sm font-semibold focus:border-emerald-500 outline-none w-full sm:max-w-xs shadow-2xs"
-                        >
-                          {!exercisesList.some((item) => item.id === ex.exerciseId) && (
-                            <option value={ex.exerciseId}>
-                              {ex.exerciseName}
-                            </option>
-                          )}
-                          {exercisesList.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name} ({item.muscle_group})
-                            </option>
-                          ))}
-                        </select>
+                          className="w-full sm:max-w-xs"
+                        />
                       </div>
 
                       <div className="flex items-center gap-3">

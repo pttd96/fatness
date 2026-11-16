@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { api } from '../lib/api'
+import { ExerciseCombobox } from '../components/ExerciseCombobox'
 import type {
   ClientLookupResponse,
   Exercise,
@@ -700,8 +701,8 @@ export function CoachClients() {
       {/* Add Exercise Modal */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-            <div className="p-6 bg-slate-50/80 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800">
+            <div className="p-6 bg-slate-50/80 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between rounded-t-3xl">
               <div>
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">
                   Add Exercise to {targetDayLabel}
@@ -723,17 +724,12 @@ export function CoachClients() {
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                   Select Movement
                 </label>
-                <select
-                  value={selectedCatalogId}
-                  onChange={(e) => setSelectedCatalogId(e.target.value)}
-                  className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-sm text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
-                >
-                  {catalog.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.muscle_group})
-                    </option>
-                  ))}
-                </select>
+                <ExerciseCombobox
+                  exercises={catalog}
+                  selectedExerciseId={selectedCatalogId}
+                  onSelect={(exercise) => setSelectedCatalogId(exercise.id)}
+                  placeholder="Search movement or muscle group (e.g. Incline Bench)..."
+                />
               </div>
 
               <div className="grid grid-cols-3 gap-3">
