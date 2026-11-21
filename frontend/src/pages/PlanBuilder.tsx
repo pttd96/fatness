@@ -4,16 +4,13 @@ import {
   AlertTriangle,
   Calendar,
   Check,
-  CheckCircle2,
   Dumbbell,
   Layers,
   Plus,
   Search,
   Trash2,
-  User,
   Users,
   Wand2,
-  X,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { ExerciseCombobox } from '../components/ExerciseCombobox'
@@ -792,7 +789,7 @@ export function PlanBuilder() {
                     {selectedClient.active_plan ? (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        Active Plan: {selectedClient.active_plan.plan.split_type.replace(/_/g, ' ')}
+                        Active Plan: {selectedClient.active_plan.split_type.replace(/_/g, ' ')}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
@@ -1072,10 +1069,10 @@ export function PlanBuilder() {
               </p>
               <div className="pl-3 border-l-2 border-amber-500 font-mono text-xs text-amber-900 dark:text-amber-200">
                 <p className="font-bold uppercase tracking-wider">
-                  {selectedClient.active_plan?.plan.split_type.replace(/_/g, ' ') || 'Current Plan'}
+                  {selectedClient.active_plan?.split_type.replace(/_/g, ' ') || 'Current Plan'}
                 </p>
                 <p className="text-slate-600 dark:text-slate-400">
-                  Week of {selectedClient.active_plan?.plan.week_start || 'Current Week'}
+                  Week of {selectedClient.active_plan?.week_start || 'Current Week'}
                 </p>
               </div>
               <p className="pt-1 text-slate-600 dark:text-slate-400">

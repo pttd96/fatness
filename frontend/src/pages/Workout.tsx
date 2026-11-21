@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Dumbbell,
   ExternalLink,
   Flame,
   Save,

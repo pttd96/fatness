@@ -542,7 +542,7 @@ export function CoachClients() {
                   <span>{c.display_name || c.email}</span>
                   {c.active_plan && (
                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
-                      ({c.active_plan.plan.split_type.replace(/_/g, ' ')})
+                      ({c.active_plan.split_type.replace(/_/g, ' ')})
                     </span>
                   )}
                 </button>
