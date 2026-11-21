@@ -744,7 +744,8 @@ export function PlanBuilder() {
               )}
             </div>
           </div>
-        ))}
+        ))
+      )}
       </div>
     </div>
   )

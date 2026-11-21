@@ -946,9 +946,10 @@ export function CoachClients() {
                           )
                         })}
                       </div>
-                    </div>
-                  )
-                })}
+                    )}
+                  </div>
+                )
+              })}
               </div>
             )}
           </div>
