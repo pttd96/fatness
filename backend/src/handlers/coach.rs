@@ -580,7 +580,7 @@ pub async fn update_client_plan_day(
     State(state): State<AppState>,
     Path((client_id, day_index)): Path<(Uuid, i32)>,
     Json(payload): Json<UpdateDayLabelRequest>,
-) -> Result<StatusCode, AppError> {
+) -> Result<Json<Value>, AppError> {
     let coach_email = coach.0.email.clone().unwrap_or_else(|| "coach".to_string());
     let trimmed = payload.day_label.trim();
     if trimmed.is_empty() {
@@ -625,5 +625,8 @@ pub async fn update_client_plan_day(
         .execute(&state.db)
         .await;
 
-    Ok(StatusCode::OK)
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "day_label": trimmed
+    })))
 }

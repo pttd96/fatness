@@ -61,7 +61,16 @@ export async function apiFetch<T>(
     return {} as T
   }
 
-  return response.json()
+  const text = await response.text()
+  if (!text || text.trim() === '') {
+    return {} as T
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return {} as T
+  }
 }
 
 export const api = {
