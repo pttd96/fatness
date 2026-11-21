@@ -12,6 +12,7 @@ import {
   AlertCircle,
   ExternalLink,
   X,
+  Pencil,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { ExerciseCombobox } from '../components/ExerciseCombobox'
@@ -21,11 +22,23 @@ import type {
   PlannedExerciseWithDetails,
 } from '../types'
 
+interface CoachDay {
+  dayIndex: number
+  dayLabel: string
+}
+
 export function CoachClients() {
   const [searchEmail, setSearchEmail] = useState('')
   const [loading, setLoading] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
   const [clientData, setClientData] = useState<ClientLookupResponse | null>(null)
+
+  // Plan Days management
+  const [planDays, setPlanDays] = useState<CoachDay[]>([])
+  const [editingDayIndex, setEditingDayIndex] = useState<number | null>(null)
+  const [tempDayLabel, setTempDayLabel] = useState<string>('')
+  const [savingDayIndex, setSavingDayIndex] = useState<number | null>(null)
+  const [daySaveSuccessIndex, setDaySaveSuccessIndex] = useState<number | null>(null)
 
   // Catalog for adding exercises
   const [catalog, setCatalog] = useState<Exercise[]>([])
@@ -75,6 +88,19 @@ export function CoachClients() {
     loadCatalog()
   }, [])
 
+  const syncPlanDaysFromExercises = (exercises?: PlannedExerciseWithDetails[]): CoachDay[] => {
+    if (!exercises || exercises.length === 0) return []
+    const map = new Map<number, string>()
+    for (const ex of exercises) {
+      if (!map.has(ex.day_index)) {
+        map.set(ex.day_index, ex.day_label || `Day ${ex.day_index}`)
+      }
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([dayIndex, dayLabel]) => ({ dayIndex, dayLabel }))
+  }
+
   const handleLookup = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
     const trimmed = searchEmail.trim()
@@ -84,6 +110,8 @@ export function CoachClients() {
     setLookupError(null)
     setClientData(null)
     setExerciseEdits({})
+    setPlanDays([])
+    setEditingDayIndex(null)
 
     try {
       const data = await api.coach.lookupClient(trimmed)
@@ -101,6 +129,9 @@ export function CoachClients() {
           }
         }
         setExerciseEdits(initialEdits)
+        setPlanDays(syncPlanDaysFromExercises(data.active_plan.exercises))
+      } else {
+        setPlanDays([])
       }
     } catch (err: any) {
       setLookupError(err.message || 'Failed to find client. Please verify the email.')
@@ -220,12 +251,109 @@ export function CoachClients() {
         }
       }
       setExerciseEdits(initialEdits)
+      if (newPlan.exercises) {
+        setPlanDays(syncPlanDaysFromExercises(newPlan.exercises))
+      } else {
+        setPlanDays([])
+      }
       setRolloverSuccess(`Plan rolled over to week of ${newPlan.week_start}! You can now adjust targets.`)
       setTimeout(() => setRolloverSuccess(null), 4000)
     } catch (err: any) {
       alert(`Failed to rollover plan: ${err.message}`)
     } finally {
       setRollingOver(false)
+    }
+  }
+
+  const handleAddDay = async () => {
+    if (!clientData) return
+
+    // If client doesn't have an active plan yet, initialize one
+    let currentPlan = clientData.active_plan
+    if (!currentPlan) {
+      try {
+        const d = new Date()
+        const day = d.getDay()
+        const diff = d.getDate() - day + (day === 0 ? -6 : 1)
+        const monday = new Date(d.setDate(diff)).toISOString().split('T')[0]
+
+        const initializedPlan = await api.coach.createOrUpdatePlan(clientData.client_id, {
+          week_start: monday,
+          split_type: 'custom',
+          exercises: [],
+        })
+        currentPlan = initializedPlan
+        setClientData((prev) => (prev ? { ...prev, active_plan: initializedPlan } : null))
+      } catch (err: any) {
+        alert(`Failed to initialize plan for client: ${err.message}`)
+        return
+      }
+    }
+
+    const currentMax = planDays.reduce((max, d) => Math.max(max, d.dayIndex), 0)
+    const exerciseMax = (currentPlan?.exercises || []).reduce((max, ex) => Math.max(max, ex.day_index), 0)
+    const nextIndex = Math.max(currentMax, exerciseMax) + 1
+    const newDayLabel = `Day ${nextIndex}`
+
+    setPlanDays((prev) => [...prev, { dayIndex: nextIndex, dayLabel: newDayLabel }])
+    setEditingDayIndex(nextIndex)
+    setTempDayLabel(newDayLabel)
+  }
+
+  const handleRemoveEmptyDay = (dayIndex: number) => {
+    const exercisesForDay = clientData?.active_plan?.exercises?.filter((e) => e.day_index === dayIndex) || []
+    if (exercisesForDay.length > 0) {
+      alert('Cannot delete a day that contains movements. Please delete the movements first.')
+      return
+    }
+    setPlanDays((prev) => prev.filter((d) => d.dayIndex !== dayIndex))
+    if (editingDayIndex === dayIndex) {
+      setEditingDayIndex(null)
+    }
+  }
+
+  const handleSaveDayLabel = async (dayIndex: number) => {
+    if (!clientData) return
+    const trimmed = tempDayLabel.trim()
+    if (!trimmed) {
+      alert('Day label cannot be empty')
+      return
+    }
+
+    setSavingDayIndex(dayIndex)
+    try {
+      const dayHasExercises = clientData.active_plan?.exercises?.some((e) => e.day_index === dayIndex)
+
+      if (dayHasExercises) {
+        await api.coach.updateDayLabel(clientData.client_id, dayIndex, trimmed)
+
+        // Update day_label in clientData.active_plan.exercises
+        setClientData((prev) => {
+          if (!prev || !prev.active_plan) return prev
+          return {
+            ...prev,
+            active_plan: {
+              ...prev.active_plan,
+              exercises: prev.active_plan.exercises.map((ex) =>
+                ex.day_index === dayIndex ? { ...ex, day_label: trimmed } : ex
+              ),
+            },
+          }
+        })
+      }
+
+      // Update in planDays
+      setPlanDays((prev) =>
+        prev.map((d) => (d.dayIndex === dayIndex ? { ...d, dayLabel: trimmed } : d))
+      )
+
+      setEditingDayIndex(null)
+      setDaySaveSuccessIndex(dayIndex)
+      setTimeout(() => setDaySaveSuccessIndex(null), 2500)
+    } catch (err: any) {
+      alert(`Failed to update day label: ${err.message}`)
+    } finally {
+      setSavingDayIndex(null)
     }
   }
 
@@ -269,6 +397,15 @@ export function CoachClients() {
         }
       })
 
+      setPlanDays((prev) => {
+        if (prev.some((d) => d.dayIndex === targetDayIndex)) {
+          return prev
+        }
+        return [...prev, { dayIndex: targetDayIndex, dayLabel: targetDayLabel }].sort(
+          (a, b) => a.dayIndex - b.dayIndex
+        )
+      })
+
       // Add to local edits
       setExerciseEdits((prev) => ({
         ...prev,
@@ -299,9 +436,21 @@ export function CoachClients() {
     }
   }
 
-  const sortedDayIndices = Object.keys(groupedExercises)
-    .map(Number)
-    .sort((a, b) => a - b)
+  // Combine planDays with any day_index present in exercises
+  const combinedDaysMap = new Map<number, string>()
+  for (const d of planDays) {
+    combinedDaysMap.set(d.dayIndex, d.dayLabel)
+  }
+  if (clientData?.active_plan?.exercises) {
+    for (const ex of clientData.active_plan.exercises) {
+      if (!combinedDaysMap.has(ex.day_index)) {
+        combinedDaysMap.set(ex.day_index, ex.day_label || `Day ${ex.day_index}`)
+      }
+    }
+  }
+  const allDays: CoachDay[] = Array.from(combinedDaysMap.entries())
+    .map(([dayIndex, dayLabel]) => ({ dayIndex, dayLabel }))
+    .sort((a, b) => a.dayIndex - b.dayIndex)
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -451,17 +600,26 @@ export function CoachClients() {
                 </p>
               </div>
 
-              {clientData.active_plan && (
+              <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
                 <button
                   type="button"
-                  onClick={handleRolloverPlan}
-                  disabled={rollingOver}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all self-start sm:self-auto"
+                  onClick={handleAddDay}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-emerald-700 dark:text-emerald-400 border border-slate-200 dark:border-slate-700 font-bold text-xs shadow-2xs transition-all"
                 >
-                  <Copy className="w-3.5 h-3.5" />
-                  {rollingOver ? 'Rolling Over...' : 'Roll Over Plan to Next Week'}
+                  <Plus className="w-3.5 h-3.5" /> Add Day
                 </button>
-              )}
+                {clientData.active_plan && (
+                  <button
+                    type="button"
+                    onClick={handleRolloverPlan}
+                    disabled={rollingOver}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    {rollingOver ? 'Rolling Over...' : 'Roll Over Plan to Next Week'}
+                  </button>
+                )}
+              </div>
             </div>
 
             {rolloverSuccess && (
@@ -471,48 +629,147 @@ export function CoachClients() {
               </div>
             )}
 
-            {!clientData.active_plan || sortedDayIndices.length === 0 ? (
-              <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-2">
-                <p className="font-semibold text-sm">This client currently has no active workout plan.</p>
-                <p className="text-xs">Once the client generates or selects a plan, their workout schedule will appear here for you to coach and adjust.</p>
+            {!clientData.active_plan || allDays.length === 0 ? (
+              <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-4 shadow-xs">
+                <Calendar className="w-10 h-10 mx-auto text-emerald-600 dark:text-emerald-400 opacity-80" />
+                <div className="space-y-1">
+                  <p className="font-bold text-base text-slate-800 dark:text-slate-200">
+                    No active workout schedule
+                  </p>
+                  <p className="text-xs max-w-md mx-auto">
+                    This client does not have any workout days scheduled yet. Start building their weekly split by adding training days.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddDay}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all"
+                >
+                  <Plus className="w-4 h-4" /> Add Training Day
+                </button>
               </div>
             ) : (
               <div className="space-y-6">
-                {sortedDayIndices.map((dayIdx) => {
-                  const dayExercises = groupedExercises[dayIdx]
-                  const dayLabel = dayExercises[0]?.day_label || `Day ${dayIdx}`
+                {allDays.map((day) => {
+                  const dayExercises = groupedExercises[day.dayIndex] || []
+                  const isEditingThisDay = editingDayIndex === day.dayIndex
+                  const isSavingThisDay = savingDayIndex === day.dayIndex
+                  const isSaveSuccess = daySaveSuccessIndex === day.dayIndex
 
                   return (
                     <div
-                      key={dayIdx}
+                      key={day.dayIndex}
                       className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs"
                     >
                       {/* Day Header */}
-                      <div className="p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white font-black text-xs flex items-center justify-center shadow-xs">
-                            {dayIdx}
+                      <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                          <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white font-black text-xs flex items-center justify-center shadow-xs flex-shrink-0">
+                            {day.dayIndex}
                           </span>
-                          <h4 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base">
-                            {dayLabel}
-                          </h4>
-                          <span className="text-xs font-semibold text-slate-400">
-                            ({dayExercises.length} movement{dayExercises.length === 1 ? '' : 's'})
-                          </span>
+
+                          {isEditingThisDay ? (
+                            <div className="flex items-center gap-2 flex-1 max-w-md">
+                              <input
+                                type="text"
+                                value={tempDayLabel}
+                                onChange={(e) => setTempDayLabel(e.target.value)}
+                                placeholder={`Day ${day.dayIndex}`}
+                                autoFocus
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') handleSaveDayLabel(day.dayIndex)
+                                  if (e.key === 'Escape') setEditingDayIndex(null)
+                                }}
+                                className="flex-1 px-3 py-1 bg-white dark:bg-slate-800 border border-emerald-500 rounded-xl text-sm font-bold text-slate-900 dark:text-white outline-none shadow-2xs"
+                              />
+                              <button
+                                type="button"
+                                disabled={isSavingThisDay}
+                                onClick={() => handleSaveDayLabel(day.dayIndex)}
+                                className="p-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                                title="Save Day Name"
+                              >
+                                {isSavingThisDay ? (
+                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingDayIndex(null)}
+                                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                                title="Cancel"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 flex-wrap min-w-0">
+                              <h4 className="font-bold text-slate-900 dark:text-white text-sm sm:text-base truncate">
+                                {day.dayLabel}
+                              </h4>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingDayIndex(day.dayIndex)
+                                  setTempDayLabel(day.dayLabel)
+                                }}
+                                className="p-1 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
+                                title="Edit Day Name"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              {isSaveSuccess && (
+                                <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 animate-in fade-in">
+                                  <Check className="w-3 h-3 stroke-[3]" /> Saved
+                                </span>
+                              )}
+                              <span className="text-xs font-semibold text-slate-400">
+                                ({dayExercises.length} movement{dayExercises.length === 1 ? '' : 's'})
+                              </span>
+                            </div>
+                          )}
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={() => openAddModal(dayIdx, dayLabel)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-emerald-600 dark:hover:bg-emerald-600 text-white text-xs font-bold transition-colors"
-                        >
-                          <Plus className="w-3.5 h-3.5" /> Add Movement
-                        </button>
+                        <div className="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => openAddModal(day.dayIndex, day.dayLabel)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-slate-900 dark:bg-slate-700 hover:bg-emerald-600 dark:hover:bg-emerald-600 text-white text-xs font-bold transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Add Movement
+                          </button>
+                          {dayExercises.length === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveEmptyDay(day.dayIndex)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors"
+                              title="Remove Empty Day"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
-                      {/* Day Exercise Rows */}
-                      <div className="divide-y divide-slate-100 dark:divide-slate-800/60 p-2 sm:p-4 space-y-2">
-                        {dayExercises.map((ex) => {
+                      {/* Day Movements or Empty State */}
+                      {dayExercises.length === 0 ? (
+                        <div className="p-8 text-center bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl m-3 border border-dashed border-slate-200 dark:border-slate-700/80 space-y-2">
+                          <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+                            No movements scheduled for {day.dayLabel} yet.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => openAddModal(day.dayIndex, day.dayLabel)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xs transition-all"
+                          >
+                            <Plus className="w-3.5 h-3.5" /> Add First Movement
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-slate-100 dark:divide-slate-800/60 p-2 sm:p-4 space-y-2">
+                          {dayExercises.map((ex) => {
                           const edits = exerciseEdits[ex.id] || {
                             target_sets: ex.target_sets ?? 3,
                             target_reps: ex.target_reps ?? '10',

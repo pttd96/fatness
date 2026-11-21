@@ -33,3 +33,8 @@ pub struct AddExerciseToDayRequest {
     pub target_weight_kg: Option<f64>,
     pub coaching_notes: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateDayLabelRequest {
+    pub day_label: String,
+}

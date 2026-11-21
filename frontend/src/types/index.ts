@@ -1,6 +1,6 @@
 export type MuscleGroup = 'chest' | 'back' | 'shoulders' | 'legs' | 'arms' | 'core' | 'full_body'
 
-export type SplitType = 'bro_split' | 'upper_lower' | 'push_pull_legs' | 'full_body'
+export type SplitType = 'bro_split' | 'upper_lower' | 'push_pull_legs' | 'full_body' | 'custom'
 
 export type FitnessLevel = 'beginner' | 'intermediate' | 'advanced'
 

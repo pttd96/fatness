@@ -161,6 +161,7 @@ export function Settings() {
                 <option value="upper_lower">Upper - Lower</option>
                 <option value="bro_split">Bro Split (1 muscle/day)</option>
                 <option value="full_body">Full Body</option>
+                <option value="custom">Custom Split</option>
               </select>
             </div>
           </div>

@@ -207,6 +207,14 @@ export const api = {
           body: JSON.stringify(data),
         }
       ),
+    updateDayLabel: (clientId: string, dayIndex: number, dayLabel: string) =>
+      apiFetch<void>(
+        `/coach/clients/${clientId}/plan/days/${dayIndex}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ day_label: dayLabel }),
+        }
+      ),
     updatePlannedExercise: (
       clientId: string,
       plannedExerciseId: string,

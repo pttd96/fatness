@@ -12,7 +12,7 @@ use crate::{
     errors::AppError,
     middleware::auth::CoachUser,
     models::{
-        coach::{AddExerciseToDayRequest, ClientLookupResponse, UpdatePlannedExerciseTargets},
+        coach::{AddExerciseToDayRequest, ClientLookupResponse, UpdateDayLabelRequest, UpdatePlannedExerciseTargets},
         plan::{CreatePlanRequest, RolloverPlanRequest, WeeklyPlan, WeeklyPlanWithExercises},
         planned_exercise::PlannedExerciseWithDetails,
         profile::UserProfile,
@@ -573,4 +573,57 @@ pub async fn rollover_client_plan(
     .await?;
 
     Ok((StatusCode::CREATED, Json(WeeklyPlanWithExercises { plan, exercises })))
+}
+
+pub async fn update_client_plan_day(
+    coach: CoachUser,
+    State(state): State<AppState>,
+    Path((client_id, day_index)): Path<(Uuid, i32)>,
+    Json(payload): Json<UpdateDayLabelRequest>,
+) -> Result<StatusCode, AppError> {
+    let coach_email = coach.0.email.clone().unwrap_or_else(|| "coach".to_string());
+    let trimmed = payload.day_label.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest("Day label cannot be empty".to_string()));
+    }
+
+    // 1. Get client's active weekly plan
+    let plan = sqlx::query_as::<_, WeeklyPlan>(
+        r#"
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
+        FROM public.weekly_plans
+        WHERE user_id = $1 AND status = 'active'
+        ORDER BY week_start DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(client_id)
+    .fetch_optional(&state.db)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Client does not have an active weekly plan".to_string()))?;
+
+    // 2. Update day_label in planned_exercises
+    sqlx::query(
+        r#"
+        UPDATE public.planned_exercises
+        SET day_label = $1,
+            updated_by = $2
+        WHERE weekly_plan_id = $3 AND day_index = $4
+        "#,
+    )
+    .bind(trimmed)
+    .bind(&coach_email)
+    .bind(plan.id)
+    .bind(day_index)
+    .execute(&state.db)
+    .await?;
+
+    // 3. Update updated_by on the plan
+    let _ = sqlx::query("UPDATE public.weekly_plans SET updated_by = $1 WHERE id = $2")
+        .bind(&coach_email)
+        .bind(plan.id)
+        .execute(&state.db)
+        .await;
+
+    Ok(StatusCode::OK)
 }

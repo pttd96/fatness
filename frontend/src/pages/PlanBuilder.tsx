@@ -131,6 +131,7 @@ const SPLIT_TEMPLATES: Record<SplitType, BuilderDay[]> = {
       ],
     },
   ],
+  custom: [],
 }
 
 export function PlanBuilder() {
@@ -348,6 +349,10 @@ export function PlanBuilder() {
 
   const handleApplyTemplate = (type: SplitType) => {
     setSplitType(type)
+    if (type === 'custom') {
+      setDays([])
+      return
+    }
     const template = SPLIT_TEMPLATES[type] || []
     setDays(mapTemplateDays(template, exercisesList))
   }
@@ -469,6 +474,10 @@ export function PlanBuilder() {
 
   const handleSavePlan = async () => {
     try {
+      if (days.length === 0 || days.every((d) => d.exercises.length === 0)) {
+        alert('Please add at least one day and exercise before saving your plan.')
+        return
+      }
       setSaving(true)
       const formattedExercises: CreatePlannedExerciseInput[] = []
 
@@ -548,8 +557,8 @@ export function PlanBuilder() {
           <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2 flex items-center gap-2">
             <Wand2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" /> Load Split Template
           </label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {(['push_pull_legs', 'upper_lower', 'bro_split', 'full_body'] as SplitType[]).map((st) => (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            {(['push_pull_legs', 'upper_lower', 'bro_split', 'full_body', 'custom'] as SplitType[]).map((st) => (
               <button
                 key={st}
                 type="button"
@@ -560,7 +569,7 @@ export function PlanBuilder() {
                     : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
                 }`}
               >
-                {st.replace(/_/g, ' ').toUpperCase()}
+                {st === 'custom' ? 'CUSTOM' : st.replace(/_/g, ' ').toUpperCase()}
               </button>
             ))}
           </div>
@@ -581,7 +590,23 @@ export function PlanBuilder() {
           </button>
         </div>
 
-        {days.map((day, dayIndex) => (
+        {days.length === 0 ? (
+          <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-3 shadow-xs">
+            <Layers className="w-10 h-10 mx-auto text-emerald-600 dark:text-emerald-400 opacity-80" />
+            <h3 className="font-bold text-base text-slate-900 dark:text-white">Custom Blank Routine</h3>
+            <p className="text-xs max-w-md mx-auto text-slate-500 dark:text-slate-400">
+              You selected a custom split with no predefined templates. Click &ldquo;Add Day&rdquo; below to start defining your workout days and movements.
+            </p>
+            <button
+              type="button"
+              onClick={handleAddDay}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition-all"
+            >
+              <Plus className="w-4 h-4" /> Add First Day
+            </button>
+          </div>
+        ) : (
+          days.map((day, dayIndex) => (
           <div
             key={day.dayIndex}
             className="rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs"
