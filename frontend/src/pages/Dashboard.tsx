@@ -22,7 +22,8 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { ExerciseCombobox } from '../components/ExerciseCombobox'
-import { MOCK_CURRENT_PLAN, MOCK_EXERCISES } from '../lib/mockData'
+import { useAuth } from '../hooks/useAuth'
+import { MOCK_EXERCISES } from '../lib/mockData'
 import type {
   CreatePlannedExerciseInput,
   Exercise,
@@ -42,6 +43,7 @@ const MUSCLE_FILTER_OPTIONS: { label: string; value: MuscleGroup | 'all' }[] = [
 ]
 
 export function Dashboard() {
+  const { userProfile } = useAuth()
   const [plan, setPlan] = useState<WeeklyPlanWithExercises | null>(null)
   const [catalog, setCatalog] = useState<Exercise[]>(MOCK_EXERCISES)
   const [loading, setLoading] = useState(true)
@@ -83,18 +85,9 @@ export function Dashboard() {
         // 2. Load current plan
         try {
           const data = await api.plans.getCurrent()
-          setPlan(data)
+          setPlan(data || null)
         } catch {
-          try {
-            const cached = localStorage.getItem('fatness_current_plan')
-            if (cached) {
-              setPlan(JSON.parse(cached))
-            } else {
-              setPlan(MOCK_CURRENT_PLAN)
-            }
-          } catch {
-            setPlan(MOCK_CURRENT_PLAN)
-          }
+          setPlan(null)
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load plan')
@@ -374,6 +367,62 @@ export function Dashboard() {
       <div className="flex items-center justify-center py-20 text-slate-500 dark:text-slate-400">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mr-3" />
         Loading your weekly split...
+      </div>
+    )
+  }
+
+  if (!plan) {
+    return (
+      <div className="space-y-8 pb-16">
+        <div className="relative overflow-hidden rounded-3xl bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 shadow-xs p-8 sm:p-12 text-center transition-colors">
+          <div className="max-w-xl mx-auto space-y-6">
+            <div className="inline-flex p-4 rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80 shadow-xs">
+              <Dumbbell className="w-10 h-10" />
+            </div>
+
+            <div className="space-y-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500" /> Welcome to Fatness
+              </span>
+              <h2 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                No Active Workout Plan
+              </h2>
+              <p className="text-slate-600 dark:text-slate-400 text-sm sm:text-base leading-relaxed">
+                You don't have an active training routine yet. Create your own custom routine with our Plan Builder or choose from proven templates like Push-Pull-Legs, Upper-Lower, and Bro Split.
+              </p>
+            </div>
+
+            {userProfile?.coach_by && (
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-left flex items-start gap-3 text-xs sm:text-sm">
+                <div className="w-2 h-2 rounded-full bg-emerald-500 mt-1.5 flex-shrink-0" />
+                <div>
+                  <span className="font-bold text-slate-800 dark:text-slate-200">Assigned Coach:</span>{' '}
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">{userProfile.coach_by}</span>
+                  <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">
+                    Your coach can design and assign weekly training routines directly to your account.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Link
+                to="/builder"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-md shadow-emerald-600/20 transition-all"
+              >
+                <Plus className="w-4 h-4 stroke-[3]" />
+                Build Your Workout Plan
+              </Link>
+              <Link
+                to="/exercises"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold text-sm border border-slate-200 dark:border-slate-700 transition-all"
+              >
+                <Layers className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                Movement Library
+              </Link>
+            </div>
+          </div>
+        </div>
       </div>
     )
   }

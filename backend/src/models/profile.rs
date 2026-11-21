@@ -14,6 +14,7 @@ pub struct UserProfile {
     pub goal: Option<String>,
     pub split_type: Option<String>,
     pub training_days_per_week: Option<i32>,
+    pub coach_by: Option<String>,
     pub preferences: serde_json::Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -27,6 +28,7 @@ pub struct CreateProfileRequest {
     pub goal: Option<String>,
     pub split_type: Option<String>,
     pub training_days_per_week: Option<i32>,
+    pub coach_by: Option<String>,
     pub preferences: Option<serde_json::Value>,
 }
 
@@ -37,5 +39,6 @@ pub struct UpdateProfileRequest {
     pub goal: Option<String>,
     pub split_type: Option<String>,
     pub training_days_per_week: Option<i32>,
+    pub coach_by: Option<String>,
     pub preferences: Option<serde_json::Value>,
 }

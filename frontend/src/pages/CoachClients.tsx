@@ -32,6 +32,7 @@ export function CoachClients() {
   const [loading, setLoading] = useState(false)
   const [lookupError, setLookupError] = useState<string | null>(null)
   const [clientData, setClientData] = useState<ClientLookupResponse | null>(null)
+  const [assignedClients, setAssignedClients] = useState<ClientLookupResponse[]>([])
 
   // Plan Days management
   const [planDays, setPlanDays] = useState<CoachDay[]>([])
@@ -72,9 +73,9 @@ export function CoachClients() {
     >
   >({})
 
-  // Load catalog on mount
+  // Load catalog and assigned clients on mount
   useEffect(() => {
-    async function loadCatalog() {
+    async function init() {
       try {
         const exercises = await api.exercises.list()
         setCatalog(exercises)
@@ -84,8 +85,15 @@ export function CoachClients() {
       } catch (err) {
         console.error('Failed to load exercises catalog', err)
       }
+
+      try {
+        const clients = await api.coach.listClients()
+        setAssignedClients(clients || [])
+      } catch (err) {
+        console.error('Failed to load assigned clients', err)
+      }
     }
-    loadCatalog()
+    init()
   }, [])
 
   const syncPlanDaysFromExercises = (exercises?: PlannedExerciseWithDetails[]): CoachDay[] => {
@@ -101,9 +109,8 @@ export function CoachClients() {
       .map(([dayIndex, dayLabel]) => ({ dayIndex, dayLabel }))
   }
 
-  const handleLookup = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
-    const trimmed = searchEmail.trim()
+  const performLookup = async (emailToSearch: string) => {
+    const trimmed = emailToSearch.trim()
     if (!trimmed) return
 
     setLoading(true)
@@ -138,6 +145,11 @@ export function CoachClients() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleLookup = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    await performLookup(searchEmail)
   }
 
   const handleFieldChange = (
@@ -503,6 +515,41 @@ export function CoachClients() {
             </button>
           </div>
         </form>
+
+        {assignedClients.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 space-y-2">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Assigned Clients ({assignedClients.length})
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {assignedClients.map((c) => (
+                <button
+                  key={c.client_id}
+                  type="button"
+                  onClick={() => {
+                    if (c.email) {
+                      setSearchEmail(c.email)
+                      performLookup(c.email)
+                    }
+                  }}
+                  className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
+                    clientData?.client_id === c.client_id
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                      : 'bg-slate-50 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>{c.display_name || c.email}</span>
+                  {c.active_plan && (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono">
+                      ({c.active_plan.plan.split_type.replace(/_/g, ' ')})
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {lookupError && (
           <div className="mt-4 p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-sm font-medium flex items-center gap-3">

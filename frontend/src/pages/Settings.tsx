@@ -11,6 +11,7 @@ export function Settings() {
   const [goal, setGoal] = useState<Goal>('hypertrophy')
   const [splitType, setSplitType] = useState<SplitType>('push_pull_legs')
   const [trainingDays, setTrainingDays] = useState(4)
+  const [coachEmail, setCoachEmail] = useState('')
   const [equipmentNotes, setEquipmentNotes] = useState('Full commercial gym with barbells, dumbbells, cables')
   const [saving, setSaving] = useState(false)
   const [savedSuccess, setSavedSuccess] = useState(false)
@@ -25,6 +26,7 @@ export function Settings() {
           setGoal(profile.goal || 'hypertrophy')
           setSplitType(profile.split_type || 'push_pull_legs')
           setTrainingDays(profile.training_days_per_week || 4)
+          setCoachEmail(profile.coach_by || '')
           if (profile.preferences?.equipment) {
             setEquipmentNotes(profile.preferences.equipment)
           }
@@ -46,6 +48,7 @@ export function Settings() {
         goal,
         split_type: splitType,
         training_days_per_week: trainingDays,
+        coach_by: coachEmail.trim() ? coachEmail.trim().toLowerCase() : '',
         preferences: { equipment: equipmentNotes },
       })
       await refreshProfile()
@@ -107,6 +110,22 @@ export function Settings() {
                   {role}
                 </span>
               </div>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                Coach Email (Optional)
+              </label>
+              <input
+                type="email"
+                value={coachEmail}
+                onChange={(e) => setCoachEmail(e.target.value)}
+                placeholder="e.g. coach@example.com"
+                className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm font-medium focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-700 outline-none"
+              />
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                Enter your coach's registered email address so they can assign and manage your weekly workout routines.
+              </p>
             </div>
           </div>
         </div>

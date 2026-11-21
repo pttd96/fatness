@@ -1,18 +1,30 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  AlertTriangle,
   Calendar,
   Check,
+  CheckCircle2,
   Dumbbell,
-  Plus,
-  Trash2,
-  Wand2,
   Layers,
+  Plus,
+  Search,
+  Trash2,
+  User,
+  Users,
+  Wand2,
+  X,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { ExerciseCombobox } from '../components/ExerciseCombobox'
 import { MOCK_EXERCISES } from '../lib/mockData'
-import type { CreatePlannedExerciseInput, Exercise, SplitType } from '../types'
+import type {
+  ClientLookupResponse,
+  CreatePlannedExerciseInput,
+  Exercise,
+  SplitType,
+} from '../types'
+import { useAuth } from '../hooks/useAuth'
 
 interface BuilderDay {
   dayIndex: number
@@ -136,6 +148,7 @@ const SPLIT_TEMPLATES: Record<SplitType, BuilderDay[]> = {
 
 export function PlanBuilder() {
   const navigate = useNavigate()
+  const { isCoach } = useAuth()
 
   const [splitType, setSplitType] = useState<SplitType>('push_pull_legs')
   const [weekStart, setWeekStart] = useState(() => {
@@ -149,6 +162,57 @@ export function PlanBuilder() {
   const [days, setDays] = useState<BuilderDay[]>(SPLIT_TEMPLATES.push_pull_legs)
   const [exercisesList, setExercisesList] = useState<Exercise[]>(MOCK_EXERCISES)
   const [saving, setSaving] = useState(false)
+
+  // Coach Assignment State
+  const [assignTarget, setAssignTarget] = useState<'myself' | 'client'>('myself')
+  const [coachClients, setCoachClients] = useState<ClientLookupResponse[]>([])
+  const [selectedClient, setSelectedClient] = useState<ClientLookupResponse | null>(null)
+  const [clientSearchEmail, setClientSearchEmail] = useState('')
+  const [searchingClient, setSearchingClient] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+
+  // Fetch coach clients roster on mount
+  useEffect(() => {
+    if (isCoach) {
+      api.coach
+        .listClients()
+        .then((clients) => {
+          setCoachClients(clients || [])
+        })
+        .catch((err) => {
+          console.error('Failed to load coach clients:', err)
+        })
+    }
+  }, [isCoach])
+
+  const handleSelectClient = (clientId: string) => {
+    setSearchError(null)
+    const found = coachClients.find((c) => c.client_id === clientId)
+    if (found) {
+      setSelectedClient(found)
+      setClientSearchEmail(found.email || '')
+    } else {
+      setSelectedClient(null)
+    }
+  }
+
+  const handleLookupClient = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault()
+    const email = clientSearchEmail.trim()
+    if (!email) return
+    setSearchingClient(true)
+    setSearchError(null)
+    try {
+      const data = await api.coach.lookupClient(email)
+      setSelectedClient(data)
+    } catch (err: any) {
+      setSearchError(err.message || 'Client not found')
+      setSelectedClient(null)
+    } finally {
+      setSearchingClient(false)
+    }
+  }
 
   const cleanNormalize = (s: string): string => {
     if (!s) return ''
@@ -472,12 +536,8 @@ export function PlanBuilder() {
     )
   }
 
-  const handleSavePlan = async () => {
+  const executeSavePersonalPlan = async () => {
     try {
-      if (days.length === 0 || days.every((d) => d.exercises.length === 0)) {
-        alert('Please add at least one day and exercise before saving your plan.')
-        return
-      }
       setSaving(true)
       const formattedExercises: CreatePlannedExerciseInput[] = []
 
@@ -510,6 +570,70 @@ export function PlanBuilder() {
     }
   }
 
+  const executeSaveClientPlan = async (clientId: string) => {
+    try {
+      setSaving(true)
+      const formattedExercises: CreatePlannedExerciseInput[] = []
+
+      days.forEach((day) => {
+        day.exercises.forEach((ex, orderIdx) => {
+          formattedExercises.push({
+            exercise_id: ex.exerciseId,
+            day_label: day.dayLabel,
+            day_index: day.dayIndex,
+            exercise_order: orderIdx + 1,
+            target_sets: ex.targetSets,
+            target_reps: ex.targetReps,
+            target_weight_kg: ex.targetWeightKg,
+            coaching_notes: ex.coachingNotes,
+          })
+        })
+      })
+
+      await api.coach.createOrUpdatePlan(clientId, {
+        week_start: weekStart,
+        split_type: splitType,
+        exercises: formattedExercises,
+      })
+
+      alert(
+        `Workout plan successfully assigned to ${
+          selectedClient?.display_name || selectedClient?.email || 'client'
+        }!`
+      )
+      navigate('/coach/clients')
+    } catch (err: any) {
+      alert(`Error assigning plan to client: ${err.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleSavePlan = async () => {
+    if (days.length === 0 || days.every((d) => d.exercises.length === 0)) {
+      alert('Please add at least one day and exercise before saving your plan.')
+      return
+    }
+
+    if (isCoach && assignTarget === 'client') {
+      if (!selectedClient) {
+        alert('Please select or lookup a client to assign this workout plan to.')
+        return
+      }
+
+      // If client already has an active plan, show confirmation pop-up
+      if (selectedClient.active_plan) {
+        setShowConfirmModal(true)
+        return
+      }
+
+      await executeSaveClientPlan(selectedClient.client_id)
+      return
+    }
+
+    await executeSavePersonalPlan()
+  }
+
   return (
     <div className="max-w-5xl mx-auto space-y-8 pb-24">
       {/* Page Title */}
@@ -530,14 +654,159 @@ export function PlanBuilder() {
           className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-md shadow-emerald-600/20 transition-all self-start sm:self-auto"
         >
           {saving ? (
-            'Saving Plan...'
+            isCoach && assignTarget === 'client' ? 'Assigning Plan...' : 'Saving Plan...'
           ) : (
             <>
-              <Check className="w-4 h-4 stroke-[3]" /> Save & Activate Plan
+              <Check className="w-4 h-4 stroke-[3]" />{' '}
+              {isCoach && assignTarget === 'client'
+                ? `Assign to ${selectedClient?.display_name || selectedClient?.email || 'Client'}`
+                : 'Save & Activate Plan'}
             </>
           )}
         </button>
       </div>
+
+      {/* Coach Assignment Panel */}
+      {isCoach && (
+        <div className="p-6 sm:p-7 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                Plan Recipient
+              </h2>
+              <p className="text-slate-500 dark:text-slate-400 text-xs mt-0.5">
+                Choose whether you are building this routine for yourself or assigning it directly to a client.
+              </p>
+            </div>
+
+            {/* Segmented Control */}
+            <div className="inline-flex p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setAssignTarget('myself')
+                  setSelectedClient(null)
+                  setSearchError(null)
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  assignTarget === 'myself'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Assign to Myself
+              </button>
+              <button
+                type="button"
+                onClick={() => setAssignTarget('client')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  assignTarget === 'client'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Assign to Client
+              </button>
+            </div>
+          </div>
+
+          {assignTarget === 'client' && (
+            <div className="pt-2 space-y-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* 1. Pick from Assigned Clients */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                    My Assigned Clients {coachClients.length > 0 && `(${coachClients.length})`}
+                  </label>
+                  <select
+                    value={selectedClient?.client_id || ''}
+                    onChange={(e) => handleSelectClient(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm font-semibold focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-700 outline-none"
+                  >
+                    <option value="">-- Select from your client roster --</option>
+                    {coachClients.map((c) => (
+                      <option key={c.client_id} value={c.client_id}>
+                        {c.display_name ? `${c.display_name} (${c.email})` : c.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Or search by email */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
+                    Or Lookup Client by Email
+                  </label>
+                  <form onSubmit={handleLookupClient} className="flex gap-2">
+                    <input
+                      type="email"
+                      value={clientSearchEmail}
+                      onChange={(e) => setClientSearchEmail(e.target.value)}
+                      placeholder="client@example.com"
+                      className="flex-1 px-4 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-sm font-medium focus:border-emerald-500 focus:bg-white dark:focus:bg-slate-700 outline-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={searchingClient || !clientSearchEmail.trim()}
+                      className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs transition-all flex items-center gap-1.5"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      {searchingClient ? '...' : 'Find'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+
+              {searchError && (
+                <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 font-medium">
+                  {searchError}
+                </div>
+              )}
+
+              {/* Selected Client Card */}
+              {selectedClient && (
+                <div className="p-4 rounded-2xl bg-emerald-50/50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 flex items-center justify-center font-bold text-base flex-shrink-0">
+                      {(selectedClient.display_name || selectedClient.email || 'C')[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-slate-900 dark:text-white text-sm">
+                          {selectedClient.display_name || 'Client'}
+                        </span>
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {selectedClient.email}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>Goal: <b className="text-slate-700 dark:text-slate-300 capitalize">{selectedClient.goal || 'General'}</b></span>
+                        <span>•</span>
+                        <span>Level: <b className="text-slate-700 dark:text-slate-300 capitalize">{selectedClient.fitness_level || 'Intermediate'}</b></span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    {selectedClient.active_plan ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        Active Plan: {selectedClient.active_plan.plan.split_type.replace(/_/g, ' ')}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        <Check className="w-3.5 h-3.5" />
+                        No Active Plan
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Plan Meta Controls */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 p-6 rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xs">
@@ -747,6 +1016,99 @@ export function PlanBuilder() {
         ))
       )}
       </div>
+
+      {/* Bottom Action Bar */}
+      <div className="flex items-center justify-end gap-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+        <button
+          type="button"
+          onClick={() => navigate('/dashboard')}
+          className="px-5 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSavePlan}
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-md shadow-emerald-600/20 transition-all"
+        >
+          {saving ? (
+            isCoach && assignTarget === 'client' ? 'Assigning Plan...' : 'Saving Plan...'
+          ) : (
+            <>
+              <Check className="w-4 h-4 stroke-[3]" />{' '}
+              {isCoach && assignTarget === 'client'
+                ? `Assign to ${selectedClient?.display_name || selectedClient?.email || 'Client'}`
+                : 'Save & Activate Plan'}
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Confirmation Modal when client already has an active plan */}
+      {showConfirmModal && selectedClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="relative w-full max-w-lg rounded-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl p-6 sm:p-8 space-y-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center flex-shrink-0 border border-amber-200 dark:border-amber-800">
+                <AlertTriangle className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                  Replace Active Workout Plan?
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Client has an ongoing active training split.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 text-xs sm:text-sm text-slate-700 dark:text-slate-300 space-y-2">
+              <p>
+                <span className="font-bold text-slate-900 dark:text-white">
+                  {selectedClient.display_name || selectedClient.email}
+                </span>{' '}
+                already has an active workout routine:
+              </p>
+              <div className="pl-3 border-l-2 border-amber-500 font-mono text-xs text-amber-900 dark:text-amber-200">
+                <p className="font-bold uppercase tracking-wider">
+                  {selectedClient.active_plan?.plan.split_type.replace(/_/g, ' ') || 'Current Plan'}
+                </p>
+                <p className="text-slate-600 dark:text-slate-400">
+                  Week of {selectedClient.active_plan?.plan.week_start || 'Current Week'}
+                </p>
+              </div>
+              <p className="pt-1 text-slate-600 dark:text-slate-400">
+                Assigning this new plan will mark their current routine as completed and notify the client that their plan has been replaced.
+              </p>
+            </div>
+
+            <div className="flex flex-col-reverse sm:flex-row items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowConfirmModal(false)}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-sm transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowConfirmModal(false)
+                  if (selectedClient) {
+                    await executeSaveClientPlan(selectedClient.client_id)
+                  }
+                }}
+                disabled={saving}
+                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm shadow-md shadow-amber-600/20 transition-all flex items-center justify-center gap-2"
+              >
+                <Check className="w-4 h-4 stroke-[3]" />
+                {saving ? 'Replacing...' : 'Yes, Replace Active Plan'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

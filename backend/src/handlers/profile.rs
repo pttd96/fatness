@@ -15,7 +15,7 @@ pub async fn get_profile(
     let profile = sqlx::query_as::<_, UserProfile>(
         r#"
         SELECT id, user_id, email, role, display_name, fitness_level, goal, split_type,
-               training_days_per_week, preferences, created_at, updated_at
+               training_days_per_week, coach_by, preferences, created_at, updated_at
         FROM public.user_profiles
         WHERE user_id = $1
         "#,
@@ -45,16 +45,16 @@ pub async fn get_profile(
         r#"
         INSERT INTO public.user_profiles (
             user_id, email, role, display_name, fitness_level, goal, split_type,
-            training_days_per_week, preferences, created_at, updated_at
+            training_days_per_week, coach_by, preferences, created_at, updated_at
         )
         VALUES (
             $1, $2, 'CLIENT', NULL, 'intermediate', 'hypertrophy', 'push_pull_legs',
-            4, '{}', now(), now()
+            4, NULL, '{}', now(), now()
         )
         ON CONFLICT (user_id) DO UPDATE
         SET email = COALESCE(public.user_profiles.email, EXCLUDED.email)
         RETURNING id, user_id, email, role, display_name, fitness_level, goal, split_type,
-                  training_days_per_week, preferences, created_at, updated_at
+                  training_days_per_week, coach_by, preferences, created_at, updated_at
         "#,
     )
     .bind(auth_user.user_id)
@@ -72,25 +72,34 @@ pub async fn create_profile(
 ) -> Result<(StatusCode, Json<UserProfile>), AppError> {
     let preferences = payload.preferences.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
     let email = payload.email.or(auth_user.email);
+    let coach_by = payload.coach_by.and_then(|s| {
+        let trimmed = s.trim().to_lowercase();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    });
 
     let profile = sqlx::query_as::<_, UserProfile>(
         r#"
         INSERT INTO public.user_profiles (
             user_id, email, role, display_name, fitness_level, goal, split_type,
-            training_days_per_week, preferences, created_at, updated_at
+            training_days_per_week, coach_by, preferences, created_at, updated_at
         )
-        VALUES ($1, $2, 'CLIENT', $3, $4, $5, $6, $7, $8, now(), now())
+        VALUES ($1, $2, 'CLIENT', $3, $4, $5, $6, $7, $8, $9, now(), now())
         ON CONFLICT (user_id) DO UPDATE
         SET display_name = COALESCE(EXCLUDED.display_name, public.user_profiles.display_name),
             fitness_level = COALESCE(EXCLUDED.fitness_level, public.user_profiles.fitness_level),
             goal = COALESCE(EXCLUDED.goal, public.user_profiles.goal),
             split_type = COALESCE(EXCLUDED.split_type, public.user_profiles.split_type),
             training_days_per_week = COALESCE(EXCLUDED.training_days_per_week, public.user_profiles.training_days_per_week),
+            coach_by = COALESCE(EXCLUDED.coach_by, public.user_profiles.coach_by),
             preferences = COALESCE(EXCLUDED.preferences, public.user_profiles.preferences),
             email = COALESCE(public.user_profiles.email, EXCLUDED.email),
             updated_at = now()
         RETURNING id, user_id, email, role, display_name, fitness_level, goal, split_type,
-                  training_days_per_week, preferences, created_at, updated_at
+                  training_days_per_week, coach_by, preferences, created_at, updated_at
         "#,
     )
     .bind(auth_user.user_id)
@@ -100,6 +109,7 @@ pub async fn create_profile(
     .bind(payload.goal)
     .bind(payload.split_type)
     .bind(payload.training_days_per_week)
+    .bind(coach_by)
     .bind(preferences)
     .fetch_one(&state.db)
     .await?;
@@ -112,6 +122,12 @@ pub async fn update_profile(
     State(state): State<AppState>,
     Json(payload): Json<UpdateProfileRequest>,
 ) -> Result<Json<UserProfile>, AppError> {
+    let (should_update_coach, coach_val) = match payload.coach_by {
+        Some(s) if s.trim().is_empty() => (true, None),
+        Some(s) => (true, Some(s.trim().to_lowercase())),
+        None => (false, None),
+    };
+
     let profile = sqlx::query_as::<_, UserProfile>(
         r#"
         UPDATE public.user_profiles
@@ -121,10 +137,11 @@ pub async fn update_profile(
             split_type = COALESCE($5, split_type),
             training_days_per_week = COALESCE($6, training_days_per_week),
             preferences = COALESCE($7, preferences),
+            coach_by = CASE WHEN $8 THEN $9 ELSE coach_by END,
             updated_at = now()
         WHERE user_id = $1
         RETURNING id, user_id, email, role, display_name, fitness_level, goal, split_type,
-                  training_days_per_week, preferences, created_at, updated_at
+                  training_days_per_week, coach_by, preferences, created_at, updated_at
         "#,
     )
     .bind(auth_user.user_id)
@@ -134,6 +151,8 @@ pub async fn update_profile(
     .bind(payload.split_type)
     .bind(payload.training_days_per_week)
     .bind(payload.preferences)
+    .bind(should_update_coach)
+    .bind(coach_val)
     .fetch_optional(&state.db)
     .await?
     .ok_or_else(|| AppError::NotFound("User profile not found".to_string()))?;

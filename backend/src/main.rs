@@ -139,6 +139,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         // Coach routes (Require COACH role)
         .route(
+            "/coach/clients",
+            get(handlers::coach::list_coach_clients),
+        )
+        .route(
             "/coach/clients/lookup",
             get(handlers::coach::lookup_client),
         )

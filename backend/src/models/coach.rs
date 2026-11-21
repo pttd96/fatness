@@ -12,6 +12,7 @@ pub struct ClientLookupResponse {
     pub goal: Option<String>,
     pub split_type: Option<String>,
     pub training_days_per_week: Option<i32>,
+    pub coach_by: Option<String>,
     pub active_plan: Option<WeeklyPlanWithExercises>,
 }
 

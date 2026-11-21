@@ -25,6 +25,82 @@ pub struct LookupQuery {
     pub email: String,
 }
 
+pub async fn list_coach_clients(
+    coach: CoachUser,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ClientLookupResponse>>, AppError> {
+    let coach_email = coach.0.email.clone().unwrap_or_default();
+    if coach_email.trim().is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    let clients = sqlx::query_as::<_, UserProfile>(
+        r#"
+        SELECT id, user_id, email, role, display_name, fitness_level, goal, split_type,
+               training_days_per_week, coach_by, preferences, created_at, updated_at
+        FROM public.user_profiles
+        WHERE LOWER(coach_by) = LOWER($1)
+        ORDER BY display_name ASC NULLS LAST, email ASC
+        "#,
+    )
+    .bind(coach_email.trim())
+    .fetch_all(&state.db)
+    .await?;
+
+    let mut result = Vec::new();
+    for client in clients {
+        let plan = sqlx::query_as::<_, WeeklyPlan>(
+            r#"
+            SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
+            FROM public.weekly_plans
+            WHERE user_id = $1 AND status = 'active'
+            ORDER BY week_start DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(client.user_id)
+        .fetch_optional(&state.db)
+        .await?;
+
+        let active_plan = if let Some(p) = plan {
+            let exercises = sqlx::query_as::<_, PlannedExerciseWithDetails>(
+                r#"
+                SELECT pe.id, pe.weekly_plan_id, pe.exercise_id, pe.day_label, pe.day_index,
+                       pe.exercise_order, pe.target_sets, pe.target_reps, pe.target_weight_kg,
+                       pe.coaching_notes, pe.actual_log, pe.logged_at,
+                       pe.status, pe.created_by, pe.updated_by,
+                       e.name AS exercise_name, e.muscle_group, e.youtube_url
+                FROM public.planned_exercises pe
+                JOIN public.exercises e ON e.id = pe.exercise_id
+                WHERE pe.weekly_plan_id = $1
+                ORDER BY pe.day_index ASC, pe.exercise_order ASC
+                "#,
+            )
+            .bind(p.id)
+            .fetch_all(&state.db)
+            .await?;
+
+            Some(WeeklyPlanWithExercises { plan: p, exercises })
+        } else {
+            None
+        };
+
+        result.push(ClientLookupResponse {
+            client_id: client.user_id,
+            email: client.email,
+            display_name: client.display_name,
+            fitness_level: client.fitness_level,
+            goal: client.goal,
+            split_type: client.split_type,
+            training_days_per_week: client.training_days_per_week,
+            coach_by: client.coach_by,
+            active_plan,
+        });
+    }
+
+    Ok(Json(result))
+}
+
 pub async fn lookup_client(
     _coach: CoachUser,
     State(state): State<AppState>,
@@ -39,7 +115,7 @@ pub async fn lookup_client(
     let mut profile = sqlx::query_as::<_, UserProfile>(
         r#"
         SELECT id, user_id, email, role, display_name, fitness_level, goal, split_type,
-               training_days_per_week, preferences, created_at, updated_at
+               training_days_per_week, coach_by, preferences, created_at, updated_at
         FROM public.user_profiles
         WHERE LOWER(email) = LOWER($1)
         LIMIT 1
@@ -63,12 +139,12 @@ pub async fn lookup_client(
                 r#"
                 INSERT INTO public.user_profiles (
                     user_id, email, role, fitness_level, goal, split_type,
-                    training_days_per_week, preferences, created_at, updated_at
+                    training_days_per_week, coach_by, preferences, created_at, updated_at
                 )
-                VALUES ($1, $2, 'CLIENT', 'intermediate', 'hypertrophy', 'push_pull_legs', 4, '{}', now(), now())
+                VALUES ($1, $2, 'CLIENT', 'intermediate', 'hypertrophy', 'push_pull_legs', 4, NULL, '{}', now(), now())
                 ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email
                 RETURNING id, user_id, email, role, display_name, fitness_level, goal, split_type,
-                          training_days_per_week, preferences, created_at, updated_at
+                          training_days_per_week, coach_by, preferences, created_at, updated_at
                 "#,
             )
             .bind(user_id)
@@ -128,6 +204,7 @@ pub async fn lookup_client(
         goal: client.goal,
         split_type: client.split_type,
         training_days_per_week: client.training_days_per_week,
+        coach_by: client.coach_by,
         active_plan,
     }))
 }
@@ -149,7 +226,31 @@ pub async fn create_or_update_client_plan(
     .await?
     .ok_or_else(|| AppError::NotFound("Client does not exist".to_string()))?;
 
+    // Check if client currently has an active plan
+    let existing_active_plan = sqlx::query_as::<_, WeeklyPlan>(
+        r#"
+        SELECT id, user_id, week_start, split_type, llm_prompt_used, llm_raw_response, status, created_by, updated_by, created_at
+        FROM public.weekly_plans
+        WHERE user_id = $1 AND status = 'active'
+        LIMIT 1
+        "#,
+    )
+    .bind(client_id)
+    .fetch_optional(&state.db)
+    .await?;
+
+    let is_replacement = existing_active_plan.is_some();
+
     let mut tx = state.db.begin().await?;
+
+    // If client had another active plan for a different week, mark it completed
+    sqlx::query(
+        "UPDATE public.weekly_plans SET status = 'completed' WHERE user_id = $1 AND status = 'active' AND week_start != $2"
+    )
+    .bind(client_id)
+    .bind(payload.week_start)
+    .execute(&mut *tx)
+    .await?;
 
     let plan = sqlx::query_as::<_, WeeklyPlan>(
         r#"
@@ -250,18 +351,43 @@ pub async fn create_or_update_client_plan(
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| coach_email.split('@').next().unwrap_or(&coach_email).to_string());
 
+        let split_label = payload.split_type.replace('_', " ");
+        let (notif_type, notif_title, notif_message) = if is_replacement {
+            (
+                "plan_replaced",
+                format!("Plan Replaced by Coach {}", coach_name),
+                format!(
+                    "Coach {} replaced your workout plan with a new {} plan for week of {}.",
+                    coach_name,
+                    split_label,
+                    payload.week_start
+                ),
+            )
+        } else {
+            (
+                "plan_created",
+                format!("New Plan from Coach {}", coach_name),
+                format!(
+                    "Coach {} assigned a new {} weekly plan for you.",
+                    coach_name,
+                    split_label
+                ),
+            )
+        };
+
         let _ = sqlx::query(
             r#"
             INSERT INTO public.notifications (
                 recipient_email, sender_email, type, title, message, link_url, is_read, created_at
             )
-            VALUES ($1, $2, 'plan_created', $3, $4, '/dashboard', false, now())
+            VALUES ($1, $2, $3, $4, $5, '/dashboard', false, now())
             "#,
         )
         .bind(client_email.trim().to_lowercase())
         .bind(coach_email.trim().to_lowercase())
-        .bind(format!("New Training Plan for Week of {}", payload.week_start))
-        .bind(format!("Coach {} created your training plan.", coach_name))
+        .bind(notif_type)
+        .bind(notif_title)
+        .bind(notif_message)
         .execute(&mut *tx)
         .await;
     }

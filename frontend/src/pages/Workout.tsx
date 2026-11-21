@@ -13,7 +13,6 @@ import {
   Info,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { MOCK_CURRENT_PLAN } from '../lib/mockData'
 import type { PlannedExerciseWithDetails, WeeklyPlanWithExercises } from '../types'
 
 export function Workout() {
@@ -31,22 +30,24 @@ export function Workout() {
     async function load() {
       try {
         setLoading(true)
-        let loadedPlan: WeeklyPlanWithExercises
+        let loadedPlan: WeeklyPlanWithExercises | null = null
         try {
           loadedPlan = await api.plans.getCurrent()
         } catch {
-          loadedPlan = MOCK_CURRENT_PLAN
+          loadedPlan = null
         }
 
         setPlan(loadedPlan)
 
-        const initialLogs: Record<string, string> = {}
-        loadedPlan.exercises.forEach((ex) => {
-          if (ex.actual_log) {
-            initialLogs[ex.id] = ex.actual_log
-          }
-        })
-        setLogs(initialLogs)
+        if (loadedPlan) {
+          const initialLogs: Record<string, string> = {}
+          loadedPlan.exercises.forEach((ex) => {
+            if (ex.actual_log) {
+              initialLogs[ex.id] = ex.actual_log
+            }
+          })
+          setLogs(initialLogs)
+        }
       } finally {
         setLoading(false)
       }
@@ -149,9 +150,36 @@ export function Workout() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20 text-slate-500">
+      <div className="flex items-center justify-center py-20 text-slate-500 dark:text-slate-400">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mr-3" />
         Loading workout session...
+      </div>
+    )
+  }
+
+  if (!plan) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 px-4 text-center space-y-6">
+        <div className="inline-flex p-4 rounded-3xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 shadow-xs">
+          <Dumbbell className="w-10 h-10" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+            No Active Workout Plan
+          </h2>
+          <p className="text-slate-600 dark:text-slate-400 text-sm max-w-md mx-auto leading-relaxed">
+            You don't have an active training split to log exercises for. Create a plan first to start logging your sets and weights.
+          </p>
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={() => navigate('/builder')}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-md shadow-emerald-600/20 transition-all"
+          >
+            Go to Plan Builder
+          </button>
+        </div>
       </div>
     )
   }

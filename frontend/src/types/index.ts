@@ -18,6 +18,7 @@ export interface UserProfile {
   goal: Goal | null
   split_type: SplitType | null
   training_days_per_week: number | null
+  coach_by?: string | null
   preferences: Record<string, any>
   created_at: string
   updated_at: string
@@ -116,6 +117,7 @@ export interface ClientLookupResponse {
   goal: Goal | null
   split_type: SplitType | null
   training_days_per_week: number | null
+  coach_by?: string | null
   active_plan: WeeklyPlanWithExercises | null
 }
 
@@ -149,7 +151,12 @@ export interface RolloverPlanRequest {
   new_week_start?: string
 }
 
-export type NotificationType = 'plan_completed' | 'plan_created' | 'plan_updated' | 'exercise_completed'
+export type NotificationType =
+  | 'plan_completed'
+  | 'plan_created'
+  | 'plan_updated'
+  | 'plan_replaced'
+  | 'exercise_completed'
 
 export interface Notification {
   id: string

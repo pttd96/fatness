@@ -126,7 +126,19 @@ export const api = {
   },
 
   plans: {
-    getCurrent: () => apiFetch<WeeklyPlanWithExercises>('/plans/current'),
+    getCurrent: async () => {
+      try {
+        return await apiFetch<WeeklyPlanWithExercises>('/plans/current')
+      } catch (err: any) {
+        if (
+          err.message?.includes('404') ||
+          err.message?.includes('No active or current weekly plan found')
+        ) {
+          return null
+        }
+        throw err
+      }
+    },
     get: (id: string) => apiFetch<WeeklyPlanWithExercises>(`/plans/${id}`),
     list: (page = 1, perPage = 10) =>
       apiFetch<PlanSummary[]>(`/plans?page=${page}&per_page=${perPage}`),
@@ -191,6 +203,7 @@ export const api = {
   },
 
   coach: {
+    listClients: () => apiFetch<ClientLookupResponse[]>('/coach/clients'),
     lookupClient: (email: string) =>
       apiFetch<ClientLookupResponse>(
         `/coach/clients/lookup?email=${encodeURIComponent(email)}`

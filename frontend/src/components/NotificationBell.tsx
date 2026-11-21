@@ -6,6 +6,7 @@ import {
   CheckCircle,
   CheckCheck,
   Dumbbell,
+  RefreshCw,
   Sparkles,
 } from 'lucide-react'
 import { api } from '../lib/api'
@@ -104,6 +105,8 @@ export function NotificationBell() {
     switch (type) {
       case 'plan_completed':
         return <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+      case 'plan_replaced':
+        return <RefreshCw className="w-4 h-4 text-amber-500 dark:text-amber-400" />
       case 'plan_created':
       case 'plan_updated':
         return <Calendar className="w-4 h-4 text-teal-600 dark:text-teal-400" />
