@@ -321,6 +321,17 @@ Supabase modern auth has migrated from symmetric HS256 secrets (`SUPABASE_JWT_SE
   3. Builds multi-stage Docker container defined in [`backend/Dockerfile`](file:///Users/admin/code/fatness/backend/Dockerfile) and pushes to Artifact Registry (`asia-southeast1-docker.pkg.dev/fatness-514604/cloud-run-source-deploy/fatness`).
   4. Deploys updated container revision to Cloud Run service `fatness` in region `asia-southeast1`.
 
+### 3. Database: Supabase Migrations Workflow
+- **File:** [`.github/workflows/deploy-migrations.yml`](.github/workflows/deploy-migrations.yml)
+- **Triggers:** Push or Pull Request to `main` with changes in `supabase/migrations/**` or `.github/workflows/deploy-migrations.yml`, plus `workflow_dispatch`.
+- **Secrets Required:**
+  - `SUPABASE_ACCESS_TOKEN`: Supabase Personal Access Token (for non-interactive CLI authentication).
+  - `SUPABASE_DB_PASSWORD`: PostgreSQL password for Supabase project `ppjpvyuhegqjqoyjwljx`.
+  - (Optional) `SUPABASE_PROJECT_ID`: Supabase project ref (defaults to `ppjpvyuhegqjqoyjwljx`).
+- **Execution:**
+  1. **Job 1 (`dry-run`):** Runs on push, PR, and dispatch. Links the project and runs `supabase db push --remote --dry-run`. Validates migration compatibility. If the remote database is already up to date, flags `has_pending=false`.
+  2. **Job 2 (`deploy`):** Runs only on push to `main` when `has_pending=true` (skipped on PRs and when database is already up to date). Applies pending migrations via `supabase db push --remote --yes`.
+
 ---
 
 ## 📋 Standard Instructions & Invariants for AI Agents

@@ -61,3 +61,4 @@ All backend code lives in [`backend/`](backend/):
 5. **Pre-Commit Verification:**
    - Frontend: `cd frontend && npm run build`
    - Backend: `cd backend && cargo check`
+6. **Database Migrations:** Place new SQL migrations in [`supabase/migrations/`](supabase/migrations/). Pushing to `main` (or opening a PR) triggers [`.github/workflows/deploy-migrations.yml`](.github/workflows/deploy-migrations.yml), which automatically performs a dry-run check and applies pending migrations to the hosted Supabase database.
