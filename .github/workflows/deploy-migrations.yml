@@ -38,18 +38,23 @@ jobs:
         with:
           version: latest
 
-      - name: Verify Required Secrets
+      - name: Verify Required Secrets and Variables
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
         run: |
           MISSING=0
           if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
-            echo "::error::Secret 'SUPABASE_ACCESS_TOKEN' is missing. Please add it under GitHub Settings > Secrets and variables > Actions."
+            echo "::error::Secret 'SUPABASE_ACCESS_TOKEN' is missing. Please add it under GitHub Settings > Secrets and variables > Actions > Secrets."
             MISSING=1
           fi
           if [ -z "$SUPABASE_DB_PASSWORD" ]; then
-            echo "::error::Secret 'SUPABASE_DB_PASSWORD' is missing. Please add it under GitHub Settings > Secrets and variables > Actions."
+            echo "::error::Secret 'SUPABASE_DB_PASSWORD' is missing. Please add it under GitHub Settings > Secrets and variables > Actions > Secrets."
+            MISSING=1
+          fi
+          if [ -z "$PROJECT_ID" ]; then
+            echo "::error::Variable 'SUPABASE_PROJECT_ID' is missing. Please add it under GitHub Settings > Secrets and variables > Actions > Variables."
             MISSING=1
           fi
           if [ $MISSING -eq 1 ]; then
@@ -60,7 +65,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID || vars.SUPABASE_PROJECT_ID || 'ppjpvyuhegqjqoyjwljx' }}
+          PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
         run: |
           echo "Linking Supabase project: $PROJECT_ID"
           supabase link --project-ref "$PROJECT_ID"
@@ -111,7 +116,7 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID || vars.SUPABASE_PROJECT_ID || 'ppjpvyuhegqjqoyjwljx' }}
+          PROJECT_ID: ${{ vars.SUPABASE_PROJECT_ID }}
         run: |
           echo "Linking Supabase project: $PROJECT_ID"
           supabase link --project-ref "$PROJECT_ID"
