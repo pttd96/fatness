@@ -229,6 +229,14 @@ export const api = {
           body: JSON.stringify(data),
         }
       ),
+    reorderPlanExercises: (clientId: string, items: ExerciseOrderItem[]) =>
+      apiFetch<WeeklyPlanWithExercises>(
+        `/coach/clients/${clientId}/plan/reorder`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ items }),
+        }
+      ),
     updateDayLabel: (clientId: string, dayIndex: number, dayLabel: string) =>
       apiFetch<void>(
         `/coach/clients/${clientId}/plan/days/${dayIndex}`,

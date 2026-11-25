@@ -431,21 +431,40 @@ pub async fn reorder_planned_exercises(
     .await?
     .ok_or_else(|| AppError::NotFound(format!("Plan {} not found", plan_id)))?;
 
-    // 2. Atomically update exercise_order within a transaction
+    // 2. Atomically update exercise_order (and optionally day_index/day_label) within a transaction
     let mut tx = state.db.begin().await?;
     for item in &payload.items {
-        sqlx::query(
-            r#"
-            UPDATE public.planned_exercises
-            SET exercise_order = $1
-            WHERE id = $2 AND weekly_plan_id = $3
-            "#,
-        )
-        .bind(item.exercise_order)
-        .bind(item.id)
-        .bind(plan.id)
-        .execute(&mut *tx)
-        .await?;
+        if let (Some(day_idx), Some(day_lbl)) = (item.day_index, &item.day_label) {
+            sqlx::query(
+                r#"
+                UPDATE public.planned_exercises
+                SET day_index = $1,
+                    day_label = $2,
+                    exercise_order = $3
+                WHERE id = $4 AND weekly_plan_id = $5
+                "#,
+            )
+            .bind(day_idx)
+            .bind(day_lbl)
+            .bind(item.exercise_order)
+            .bind(item.id)
+            .bind(plan.id)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE public.planned_exercises
+                SET exercise_order = $1
+                WHERE id = $2 AND weekly_plan_id = $3
+                "#,
+            )
+            .bind(item.exercise_order)
+            .bind(item.id)
+            .bind(plan.id)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
     tx.commit().await?;
 

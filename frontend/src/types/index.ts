@@ -141,6 +141,8 @@ export interface AddExerciseToDayRequest {
 export interface ExerciseOrderItem {
   id: string
   exercise_order: number
+  day_index?: number
+  day_label?: string
 }
 
 export interface ReorderExercisesRequest {

@@ -14,14 +14,16 @@ cd "$REPO_ROOT"
 
 echo "==> [git-sync] Running pre-commit validation..."
 
-# 1. Frontend validation (if npm is available)
+# 1. Frontend validation (if npm is available and node_modules installed)
 if command -v npm >/dev/null 2>&1; then
-  if [ -d "frontend" ]; then
+  if [ -d "frontend/node_modules" ]; then
     echo "--> Checking frontend build..."
     (cd frontend && npm run build) || {
       echo "❌ Frontend build failed! Aborting commit."
       exit 1
     }
+  else
+    echo "⚠️  frontend/node_modules not found; skipping local frontend build check."
   fi
 else
   echo "⚠️  npm not found in PATH; skipping frontend build check."

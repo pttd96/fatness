@@ -71,6 +71,10 @@ pub struct CreatePlanRequest {
 pub struct ExerciseOrderItem {
     pub id: Uuid,
     pub exercise_order: i32,
+    #[serde(default)]
+    pub day_index: Option<i32>,
+    #[serde(default)]
+    pub day_label: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

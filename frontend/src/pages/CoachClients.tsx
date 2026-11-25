@@ -13,6 +13,8 @@ import {
   ExternalLink,
   X,
   Pencil,
+  GripVertical,
+  ArrowUpDown,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { ExerciseCombobox } from '../components/ExerciseCombobox'
@@ -59,6 +61,17 @@ export function CoachClients() {
   const [addingExercise, setAddingExercise] = useState(false)
   const [rollingOver, setRollingOver] = useState(false)
   const [rolloverSuccess, setRolloverSuccess] = useState<string | null>(null)
+
+  // Drag and drop & reordering state
+  const [draggedItem, setDraggedItem] = useState<{ id: string; dayIndex: number; index: number } | null>(null)
+  const [dragOverTarget, setDragOverTarget] = useState<{ dayIndex: number; index?: number; isEndZone?: boolean } | null>(null)
+  const [isReordering, setIsReordering] = useState(false)
+  const [reorderNotice, setReorderNotice] = useState<string | null>(null)
+
+  const showReorderNotice = (msg: string) => {
+    setReorderNotice(msg)
+    setTimeout(() => setReorderNotice(null), 3500)
+  }
 
   // Local edits map: planned_exercise_id -> { target_sets, target_reps, target_weight_kg, coaching_notes }
   const [exerciseEdits, setExerciseEdits] = useState<
@@ -437,10 +450,14 @@ export function CoachClients() {
     }
   }
 
-  // Group exercises by dayIndex
+  // Group exercises by dayIndex, sorted by exercise_order
   const groupedExercises: Record<number, PlannedExerciseWithDetails[]> = {}
   if (clientData?.active_plan?.exercises) {
-    for (const ex of clientData.active_plan.exercises) {
+    const sorted = [...clientData.active_plan.exercises].sort((a, b) => {
+      if (a.day_index !== b.day_index) return a.day_index - b.day_index
+      return (a.exercise_order || 0) - (b.exercise_order || 0)
+    })
+    for (const ex of sorted) {
       if (!groupedExercises[ex.day_index]) {
         groupedExercises[ex.day_index] = []
       }
@@ -463,6 +480,221 @@ export function CoachClients() {
   const allDays: CoachDay[] = Array.from(combinedDaysMap.entries())
     .map(([dayIndex, dayLabel]) => ({ dayIndex, dayLabel }))
     .sort((a, b) => a.dayIndex - b.dayIndex)
+
+  // Reorder exercise within same day or move to a different day
+  const handleMoveExercise = async (
+    exerciseId: string,
+    targetDayIndex: number,
+    targetPosition: number
+  ) => {
+    if (!clientData || !clientData.active_plan || !clientData.active_plan.exercises) return
+    const exercises = clientData.active_plan.exercises
+    const movingEx = exercises.find((e) => e.id === exerciseId)
+    if (!movingEx) return
+
+    const sourceDayIndex = movingEx.day_index
+    const targetDayObj =
+      allDays.find((d) => d.dayIndex === targetDayIndex) ||
+      planDays.find((d) => d.dayIndex === targetDayIndex)
+    const targetDayLabel = targetDayObj?.dayLabel || `Day ${targetDayIndex}`
+
+    // Group exercises by day, sorted by exercise_order
+    const currentDayMap: Record<number, PlannedExerciseWithDetails[]> = {}
+    for (const d of allDays) {
+      currentDayMap[d.dayIndex] = []
+    }
+    for (const ex of exercises) {
+      if (!currentDayMap[ex.day_index]) {
+        currentDayMap[ex.day_index] = []
+      }
+      currentDayMap[ex.day_index].push(ex)
+    }
+    for (const dayIdx in currentDayMap) {
+      currentDayMap[dayIdx].sort((a, b) => (a.exercise_order || 0) - (b.exercise_order || 0))
+    }
+
+    let sourceUpdated: PlannedExerciseWithDetails[] = []
+    let destUpdated: PlannedExerciseWithDetails[] = []
+    let updatedExercises: PlannedExerciseWithDetails[] = []
+
+    if (sourceDayIndex === targetDayIndex) {
+      const dayList = (currentDayMap[sourceDayIndex] || []).slice()
+      const currentIdx = dayList.findIndex((e) => e.id === exerciseId)
+      if (currentIdx === -1) return
+
+      const [removed] = dayList.splice(currentIdx, 1)
+      const clampedPos = Math.max(0, Math.min(targetPosition, dayList.length))
+      dayList.splice(clampedPos, 0, removed)
+
+      destUpdated = dayList.map((ex, idx) => ({
+        ...ex,
+        exercise_order: idx + 1,
+      }))
+
+      const otherExercises = exercises.filter((e) => e.day_index !== sourceDayIndex)
+      updatedExercises = [...otherExercises, ...destUpdated].sort((a, b) => {
+        if (a.day_index !== b.day_index) return a.day_index - b.day_index
+        return (a.exercise_order || 0) - (b.exercise_order || 0)
+      })
+    } else {
+      // Cross-day move
+      const sourceList = (currentDayMap[sourceDayIndex] || []).filter((e) => e.id !== exerciseId)
+      sourceUpdated = sourceList.map((ex, idx) => ({
+        ...ex,
+        exercise_order: idx + 1,
+      }))
+
+      const destList = (currentDayMap[targetDayIndex] || []).filter((e) => e.id !== exerciseId)
+      const clampedPos = Math.max(0, Math.min(targetPosition, destList.length))
+      const movedItem: PlannedExerciseWithDetails = {
+        ...movingEx,
+        day_index: targetDayIndex,
+        day_label: targetDayLabel,
+      }
+      destList.splice(clampedPos, 0, movedItem)
+
+      destUpdated = destList.map((ex, idx) => ({
+        ...ex,
+        exercise_order: idx + 1,
+      }))
+
+      const otherExercises = exercises.filter(
+        (e) => e.day_index !== sourceDayIndex && e.day_index !== targetDayIndex
+      )
+      updatedExercises = [...otherExercises, ...sourceUpdated, ...destUpdated].sort((a, b) => {
+        if (a.day_index !== b.day_index) return a.day_index - b.day_index
+        return (a.exercise_order || 0) - (b.exercise_order || 0)
+      })
+    }
+
+    // Build items payload for backend persistence
+    const items: { id: string; exercise_order: number; day_index: number; day_label: string }[] = []
+    if (sourceDayIndex === targetDayIndex) {
+      for (const ex of destUpdated) {
+        items.push({
+          id: ex.id,
+          exercise_order: ex.exercise_order,
+          day_index: ex.day_index,
+          day_label: ex.day_label,
+        })
+      }
+    } else {
+      for (const ex of sourceUpdated) {
+        items.push({
+          id: ex.id,
+          exercise_order: ex.exercise_order,
+          day_index: ex.day_index,
+          day_label: ex.day_label,
+        })
+      }
+      for (const ex of destUpdated) {
+        items.push({
+          id: ex.id,
+          exercise_order: ex.exercise_order,
+          day_index: ex.day_index,
+          day_label: ex.day_label,
+        })
+      }
+    }
+
+    // Optimistic UI update
+    const previousPlan = clientData.active_plan
+    setClientData((prev) => {
+      if (!prev || !prev.active_plan) return prev
+      return {
+        ...prev,
+        active_plan: {
+          ...prev.active_plan,
+          exercises: updatedExercises,
+        },
+      }
+    })
+
+    const noticeText =
+      sourceDayIndex === targetDayIndex
+        ? `Reordered exercises in ${targetDayLabel}`
+        : `Moved "${movingEx.exercise_name}" to ${targetDayLabel}`
+    showReorderNotice(noticeText)
+
+    // Persist to backend
+    setIsReordering(true)
+    try {
+      const savedPlan = await api.coach.reorderPlanExercises(clientData.client_id, items)
+      setClientData((prev) => (prev ? { ...prev, active_plan: savedPlan } : null))
+    } catch (err: any) {
+      console.error('Failed to save exercise reorder:', err)
+      setClientData((prev) => (prev ? { ...prev, active_plan: previousPlan } : null))
+      alert(`Failed to save exercise reorder: ${err.message}`)
+    } finally {
+      setIsReordering(false)
+    }
+  }
+
+  // HTML5 Drag and drop handlers
+  const handleDragStart = (
+    e: React.DragEvent,
+    ex: PlannedExerciseWithDetails,
+    dayIndex: number,
+    index: number
+  ) => {
+    e.dataTransfer.setData('text/plain', ex.id)
+    e.dataTransfer.effectAllowed = 'move'
+    setDraggedItem({ id: ex.id, dayIndex, index })
+  }
+
+  const handleDragEnd = () => {
+    setDraggedItem(null)
+    setDragOverTarget(null)
+  }
+
+  const handleExerciseDragOver = (
+    e: React.DragEvent,
+    dayIndex: number,
+    index: number
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!draggedItem) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const isBottom = e.clientY > rect.top + rect.height / 2
+    const targetPos = isBottom ? index + 1 : index
+    if (dragOverTarget?.dayIndex !== dayIndex || dragOverTarget?.index !== targetPos || dragOverTarget?.isEndZone) {
+      setDragOverTarget({ dayIndex, index: targetPos, isEndZone: false })
+    }
+  }
+
+  const handleExerciseDrop = (
+    e: React.DragEvent,
+    dayIndex: number,
+    index: number
+  ) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!draggedItem) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    const isBottom = e.clientY > rect.top + rect.height / 2
+    const targetPos = isBottom ? index + 1 : index
+    const movingId = draggedItem.id
+    handleDragEnd()
+    handleMoveExercise(movingId, dayIndex, targetPos)
+  }
+
+  const handleDayContainerDragOver = (e: React.DragEvent, dayIndex: number) => {
+    e.preventDefault()
+    if (!draggedItem) return
+    if (dragOverTarget?.dayIndex !== dayIndex || !dragOverTarget?.isEndZone) {
+      setDragOverTarget({ dayIndex, isEndZone: true })
+    }
+  }
+
+  const handleDayContainerDrop = (e: React.DragEvent, dayIndex: number, fallbackPos: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!draggedItem) return
+    const movingId = draggedItem.id
+    handleDragEnd()
+    handleMoveExercise(movingId, dayIndex, fallbackPos)
+  }
 
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
@@ -676,6 +908,13 @@ export function CoachClients() {
               </div>
             )}
 
+            {reorderNotice && (
+              <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs font-semibold flex items-center gap-2 shadow-xs animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                <span>{reorderNotice}</span>
+              </div>
+            )}
+
             {!clientData.active_plan || allDays.length === 0 ? (
               <div className="p-12 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 space-y-4 shadow-xs">
                 <Calendar className="w-10 h-10 mx-auto text-emerald-600 dark:text-emerald-400 opacity-80" />
@@ -706,7 +945,12 @@ export function CoachClients() {
                   return (
                     <div
                       key={day.dayIndex}
-                      className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 overflow-hidden shadow-xs"
+                      onDragOver={(e) => handleDayContainerDragOver(e, day.dayIndex)}
+                      className={`bg-white dark:bg-slate-900 rounded-3xl border transition-all overflow-hidden shadow-xs ${
+                        dragOverTarget?.dayIndex === day.dayIndex && dragOverTarget?.isEndZone
+                          ? 'border-emerald-500 ring-2 ring-emerald-500/30'
+                          : 'border-slate-200 dark:border-slate-800'
+                      }`}
                     >
                       {/* Day Header */}
                       <div className="p-4 sm:p-5 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -802,9 +1046,19 @@ export function CoachClients() {
 
                       {/* Day Movements or Empty State */}
                       {dayExercises.length === 0 ? (
-                        <div className="p-8 text-center bg-slate-50/50 dark:bg-slate-800/30 rounded-2xl m-3 border border-dashed border-slate-200 dark:border-slate-700/80 space-y-2">
+                        <div
+                          onDragOver={(e) => handleDayContainerDragOver(e, day.dayIndex)}
+                          onDrop={(e) => handleDayContainerDrop(e, day.dayIndex, 0)}
+                          className={`p-8 text-center rounded-2xl m-3 border-2 border-dashed transition-all space-y-2 ${
+                            dragOverTarget?.dayIndex === day.dayIndex && dragOverTarget?.isEndZone
+                              ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 ring-2 ring-emerald-500/40 scale-[1.01]'
+                              : 'bg-slate-50/50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700/80'
+                          }`}
+                        >
                           <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                            No movements scheduled for {day.dayLabel} yet.
+                            {draggedItem
+                              ? `Release to drop movement here into ${day.dayLabel}`
+                              : `No movements scheduled for ${day.dayLabel} yet.`}
                           </p>
                           <button
                             type="button"
@@ -816,184 +1070,285 @@ export function CoachClients() {
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-100 dark:divide-slate-800/60 p-2 sm:p-4 space-y-2">
-                          {dayExercises.map((ex) => {
-                          const edits = exerciseEdits[ex.id] || {
-                            target_sets: ex.target_sets ?? 3,
-                            target_reps: ex.target_reps ?? '10',
-                            target_weight_kg: ex.target_weight_kg ?? 0,
-                            coaching_notes: ex.coaching_notes ?? '',
-                          }
-                          const isSaving = savingExerciseId === ex.id
-                          const isSuccess = saveSuccessId === ex.id
-                          const isDeleting = deletingExerciseId === ex.id
+                          {dayExercises.map((ex, idx) => {
+                            const edits = exerciseEdits[ex.id] || {
+                              target_sets: ex.target_sets ?? 3,
+                              target_reps: ex.target_reps ?? '10',
+                              target_weight_kg: ex.target_weight_kg ?? 0,
+                              coaching_notes: ex.coaching_notes ?? '',
+                            }
+                            const isSaving = savingExerciseId === ex.id
+                            const isSuccess = saveSuccessId === ex.id
+                            const isDeleting = deletingExerciseId === ex.id
+                            const isDragged = draggedItem?.id === ex.id
+                            const isOverBefore =
+                              dragOverTarget?.dayIndex === day.dayIndex &&
+                              dragOverTarget?.index === idx &&
+                              !dragOverTarget?.isEndZone
 
-                          return (
-                            <div
-                              key={ex.id}
-                              className="p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors flex flex-col lg:flex-row lg:items-center justify-between gap-4 border border-transparent hover:border-slate-200 dark:hover:border-slate-800"
-                            >
-                              {/* Exercise Info */}
-                              <div className="space-y-1 min-w-[200px]">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
-                                    {ex.muscle_group}
-                                  </span>
-                                  <span
-                                    className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                      ex.status === 'completed'
-                                        ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
-                                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
-                                    }`}
-                                  >
-                                    {ex.status === 'completed' ? '✓ Logged' : 'Pending'}
-                                  </span>
-                                  {ex.youtube_url && (
-                                    <a
-                                      href={ex.youtube_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-slate-400 hover:text-red-500 transition-colors"
-                                      title="Watch tutorial"
-                                    >
-                                      <ExternalLink className="w-3.5 h-3.5" />
-                                    </a>
-                                  )}
-                                </div>
-                                <h5 className="font-bold text-slate-900 dark:text-white text-sm">
-                                  {ex.exercise_name}
-                                </h5>
-                                {ex.actual_log && (
-                                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
-                                    Athlete Log: {ex.actual_log}
-                                  </p>
+                            return (
+                              <div key={ex.id} className="relative">
+                                {/* Insertion Indicator Line */}
+                                {isOverBefore && (
+                                  <div className="h-1 bg-emerald-500 rounded-full mb-1 shadow-sm shadow-emerald-500/50 animate-pulse" />
                                 )}
-                                {ex.updated_by && (
-                                  <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
-                                    Updated by: {ex.updated_by}
-                                  </p>
-                                )}
-                              </div>
 
-                              {/* Editable Targets Grid */}
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 flex-1 max-w-2xl">
-                                <div>
-                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                                    Sets
-                                  </label>
-                                  <input
-                                    type="number"
-                                    min="1"
-                                    max="20"
-                                    value={edits.target_sets}
-                                    onChange={(e) =>
-                                      handleFieldChange(
-                                        ex.id,
-                                        'target_sets',
-                                        parseInt(e.target.value) || 1
-                                      )
-                                    }
-                                    className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                                    Reps
-                                  </label>
-                                  <input
-                                    type="text"
-                                    value={edits.target_reps}
-                                    onChange={(e) =>
-                                      handleFieldChange(
-                                        ex.id,
-                                        'target_reps',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                                    Weight (kg)
-                                  </label>
-                                  <input
-                                    type="number"
-                                    step="0.5"
-                                    value={edits.target_weight_kg}
-                                    onChange={(e) =>
-                                      handleFieldChange(
-                                        ex.id,
-                                        'target_weight_kg',
-                                        parseFloat(e.target.value) || 0
-                                      )
-                                    }
-                                    className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
-                                  />
-                                </div>
-
-                                <div>
-                                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                                    Coaching Notes
-                                  </label>
-                                  <input
-                                    type="text"
-                                    placeholder="Cues, tempo, RPE..."
-                                    value={edits.coaching_notes}
-                                    onChange={(e) =>
-                                      handleFieldChange(
-                                        ex.id,
-                                        'coaching_notes',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Action Buttons */}
-                              <div className="flex items-center gap-2 pt-2 lg:pt-0 justify-end">
-                                <button
-                                  type="button"
-                                  disabled={isSaving}
-                                  onClick={() => handleSaveExerciseTargets(ex.id)}
-                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
-                                    isSuccess
-                                      ? 'bg-emerald-600 text-white'
-                                      : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white border border-emerald-200 dark:border-emerald-800'
+                                <div
+                                  draggable={true}
+                                  onDragStart={(e) => handleDragStart(e, ex, day.dayIndex, idx)}
+                                  onDragEnd={handleDragEnd}
+                                  onDragOver={(e) => handleExerciseDragOver(e, day.dayIndex, idx)}
+                                  onDrop={(e) => handleExerciseDrop(e, day.dayIndex, idx)}
+                                  className={`p-4 rounded-2xl transition-all flex flex-col lg:flex-row lg:items-center justify-between gap-4 border ${
+                                    isDragged
+                                      ? 'opacity-30 border-dashed border-emerald-500 bg-emerald-50/20 dark:bg-emerald-950/20 scale-[0.98]'
+                                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/40 border-transparent hover:border-slate-200 dark:hover:border-slate-800 bg-white dark:bg-slate-900/50'
                                   }`}
-                                  title="Save target parameters"
                                 >
-                                  {isSuccess ? (
-                                    <>
-                                      <Check className="w-3.5 h-3.5" /> Saved
-                                    </>
-                                  ) : isSaving ? (
-                                    'Saving...'
-                                  ) : (
-                                    <>
-                                      <Save className="w-3.5 h-3.5" /> Save
-                                    </>
-                                  )}
-                                </button>
+                                  {/* Grip handle, Order Badge & Exercise Info */}
+                                  <div className="space-y-1.5 min-w-[220px]">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {/* Drag Handle */}
+                                      <div
+                                        className="cursor-grab active:cursor-grabbing p-1 -ml-1 text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors flex-shrink-0"
+                                        title="Drag to reorder within day or move across days"
+                                      >
+                                        <GripVertical className="w-4 h-4" />
+                                      </div>
 
-                                <button
-                                  type="button"
-                                  disabled={isDeleting}
-                                  onClick={() => handleDeleteExercise(ex.id)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors"
-                                  title="Remove from plan"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                      {/* Order Badge */}
+                                      <span
+                                        className="w-5 h-5 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-mono font-bold flex items-center justify-center flex-shrink-0"
+                                        title={`Movement #${idx + 1}`}
+                                      >
+                                        {idx + 1}
+                                      </span>
+
+                                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-200 dark:border-emerald-800">
+                                        {ex.muscle_group}
+                                      </span>
+
+                                      <span
+                                        className={`px-1.5 py-0.2 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                          ex.status === 'completed'
+                                            ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300'
+                                            : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400'
+                                        }`}
+                                      >
+                                        {ex.status === 'completed' ? '✓ Logged' : 'Pending'}
+                                      </span>
+
+                                      {/* Quick Move Day Selector */}
+                                      <div className="flex items-center gap-1 ml-auto sm:ml-0">
+                                        <span className="text-[10px] uppercase font-bold text-slate-400">Day:</span>
+                                        <select
+                                          value={day.dayIndex}
+                                          onChange={(e) => {
+                                            const newDay = parseInt(e.target.value)
+                                            if (newDay !== day.dayIndex) {
+                                              handleMoveExercise(ex.id, newDay, 9999)
+                                            }
+                                          }}
+                                          disabled={isReordering}
+                                          className="text-[11px] font-semibold bg-slate-100 dark:bg-slate-800/80 border border-slate-300 dark:border-slate-700 rounded-lg px-2 py-0.5 text-slate-700 dark:text-slate-300 outline-none focus:border-emerald-500 cursor-pointer disabled:opacity-50"
+                                          title="Quickly move this movement to another day"
+                                        >
+                                          {allDays.map((d) => (
+                                            <option key={d.dayIndex} value={d.dayIndex}>
+                                              {d.dayLabel} (Day {d.dayIndex})
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+
+                                      {ex.youtube_url && (
+                                        <a
+                                          href={ex.youtube_url}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-slate-400 hover:text-red-500 transition-colors ml-auto"
+                                          title="Watch tutorial"
+                                        >
+                                          <ExternalLink className="w-3.5 h-3.5" />
+                                        </a>
+                                      )}
+                                    </div>
+
+                                    <h5 className="font-bold text-slate-900 dark:text-white text-sm pl-7 sm:pl-0">
+                                      {ex.exercise_name}
+                                    </h5>
+                                    {ex.actual_log && (
+                                      <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium pl-7 sm:pl-0">
+                                        Athlete Log: {ex.actual_log}
+                                      </p>
+                                    )}
+                                    {ex.updated_by && (
+                                      <p className="text-[10px] text-slate-400 dark:text-slate-500 font-mono pl-7 sm:pl-0">
+                                        Updated by: {ex.updated_by}
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  {/* Editable Targets Grid */}
+                                  <div
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 flex-1 max-w-2xl"
+                                  >
+                                    <div>
+                                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                        Sets
+                                      </label>
+                                      <input
+                                        type="number"
+                                        min="1"
+                                        max="20"
+                                        value={edits.target_sets}
+                                        onChange={(e) =>
+                                          handleFieldChange(
+                                            ex.id,
+                                            'target_sets',
+                                            parseInt(e.target.value) || 1
+                                          )
+                                        }
+                                        className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                        Reps
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={edits.target_reps}
+                                        onChange={(e) =>
+                                          handleFieldChange(
+                                            ex.id,
+                                            'target_reps',
+                                            e.target.value
+                                          )
+                                        }
+                                        className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                        Weight (kg)
+                                      </label>
+                                      <input
+                                        type="number"
+                                        step="0.5"
+                                        value={edits.target_weight_kg}
+                                        onChange={(e) =>
+                                          handleFieldChange(
+                                            ex.id,
+                                            'target_weight_kg',
+                                            parseFloat(e.target.value) || 0
+                                          )
+                                        }
+                                        className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
+                                      />
+                                    </div>
+
+                                    <div>
+                                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                                        Coaching Notes
+                                      </label>
+                                      <input
+                                        type="text"
+                                        placeholder="Cues, tempo, RPE..."
+                                        value={edits.coaching_notes}
+                                        onChange={(e) =>
+                                          handleFieldChange(
+                                            ex.id,
+                                            'coaching_notes',
+                                            e.target.value
+                                          )
+                                        }
+                                        className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:border-emerald-500 outline-none"
+                                      />
+                                    </div>
+                                  </div>
+
+                                  {/* Action Buttons */}
+                                  <div className="flex items-center gap-2 pt-2 lg:pt-0 justify-end">
+                                    <button
+                                      type="button"
+                                      disabled={isSaving}
+                                      onClick={() => handleSaveExerciseTargets(ex.id)}
+                                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                                        isSuccess
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-600 hover:text-white border border-emerald-200 dark:border-emerald-800'
+                                      }`}
+                                      title="Save target parameters"
+                                    >
+                                      {isSuccess ? (
+                                        <>
+                                          <Check className="w-3.5 h-3.5" /> Saved
+                                        </>
+                                      ) : isSaving ? (
+                                        'Saving...'
+                                      ) : (
+                                        <>
+                                          <Save className="w-3.5 h-3.5" /> Save
+                                        </>
+                                      )}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      disabled={isDeleting}
+                                      onClick={() => handleDeleteExercise(ex.id)}
+                                      className="p-1.5 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-xl transition-colors"
+                                      title="Remove from plan"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
+                            )
+                          })}
+
+                          {/* End of Day Drop Zone */}
+                          {draggedItem && (
+                            <div
+                              onDragOver={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                setDragOverTarget({
+                                  dayIndex: day.dayIndex,
+                                  index: dayExercises.length,
+                                  isEndZone: true,
+                                })
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                if (draggedItem) {
+                                  handleMoveExercise(
+                                    draggedItem.id,
+                                    day.dayIndex,
+                                    dayExercises.length
+                                  )
+                                }
+                                handleDragEnd()
+                              }}
+                              className={`mt-2 py-2.5 px-4 rounded-xl border-2 border-dashed text-center transition-all ${
+                                dragOverTarget?.dayIndex === day.dayIndex && dragOverTarget?.isEndZone
+                                  ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 ring-2 ring-emerald-500/30 scale-[1.01]'
+                                  : 'border-slate-300 dark:border-slate-700 text-slate-400 hover:border-slate-400 dark:hover:border-slate-600 bg-slate-50/40 dark:bg-slate-800/20'
+                              }`}
+                            >
+                              <p className="text-xs font-semibold flex items-center justify-center gap-1.5">
+                                <ArrowUpDown className="w-3.5 h-3.5" /> Drop here to move to end of {day.dayLabel}
+                              </p>
                             </div>
-                          )
-                        })}
-                      </div>
-                    )}
+                          )}
+                        </div>
+                      )}
                   </div>
                 )
               })}

@@ -159,6 +159,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             post(handlers::coach::add_client_planned_exercise),
         )
         .route(
+            "/coach/clients/{client_id}/plan/reorder",
+            put(handlers::coach::reorder_client_plan_exercises),
+        )
+        .route(
             "/coach/clients/{client_id}/plan/days/{day_index}",
             patch(handlers::coach::update_client_plan_day),
         )
